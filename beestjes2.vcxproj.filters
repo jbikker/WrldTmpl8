@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="game.cpp" />
+    <ClCompile Include="template.cpp">
+      <Filter>template</Filter>
+    </ClCompile>
+    <ClCompile Include="world.cpp">
+      <Filter>template</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="game.h" />
+    <ClInclude Include="template.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="common.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="world.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="bluenoise.h">
+      <Filter>template</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="template">
+      <UniqueIdentifier>{4e4111ea-4d9b-4359-aa98-f13e40acb290}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="template\cl">
+      <UniqueIdentifier>{e145b6f4-c44f-44fe-9832-b83d8ee6e447}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="cl\kernels.cl">
+      <Filter>template\cl</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="_readme.txt">
+      <Filter>template</Filter>
+    </Text>
+  </ItemGroup>
+</Project>
