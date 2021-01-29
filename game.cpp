@@ -50,6 +50,8 @@ void Game::Tick( float deltaTime )
 		for( int y = max( 1, h1 ); y < h2; y++ ) world->Set( x, y, z, GREY );
 		world->Set( x, 0, z, LIGHTBLUE );
 	}
+	world->Print( "Hello World!", 800, 80, 5, 1 );
+	world->Print( "Hello World!", 800, 80, 1020, 1 );
 	// grow tree
 	uint r = tr - (tree / 26);
 	if (tree > -1 && r > 1) 

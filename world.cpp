@@ -37,6 +37,7 @@ World::World( const uint targetID )
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
 	// prepare a test world
 	grid = commit; // for efficiency, the top-level grid resides in the commit buffer
+	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
 	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin" );
 	brickBuffer->CopyToDevice();
@@ -71,6 +72,8 @@ World::World( const uint targetID )
 	blueNoise->CopyToDevice();
 	delete data32;
 	renderer->SetArgument( 5, blueNoise );
+	// load a bitmap font for the print command
+	font = new Surface( "assets/font.png" );
 }
 
 // World Destructor
@@ -218,6 +221,27 @@ void World::HDisc( const float x, const float y, const float z, const float r, c
 	{
 		float d2 = SQR( (float)u - x ) + SQR( (float)w - z );
 		if (d2 < r2) Set( u, (uint)y, w, c );
+	}
+}
+
+// World::Print
+// ----------------------------------------------------------------------------
+void World::Print( const char* text, const uint x, const uint y, const uint z, const uint c )
+{
+	static char f[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890+-=/\\*:;()[]{}<>!?.,'\"&#$_%^|";
+	static int* r = 0;
+	if (!r)
+	{
+		r = new int[256];
+		memset( r, 0, 1024 );
+		for( int i = 0; i < strlen( f ); i++ ) r[f[i]] = i;
+	}
+	for( int i = 0; i < strlen( text ); i++ ) if (text[i] > 32)
+	{
+		const int t = r[text[i]], cx = t % 13, cy = t / 13;
+		uint* a = font->buffer + cx * 6 + cy * 10 * 78;
+		for( int v = 0; v < 10; v++ ) for( int u = 0; u < 6; u++ )
+			if ((a[u + v * 78] & 0xffffff) == 0) Set( x + u + i * 6, y + (9 - v), z, c );
 	}
 }
 

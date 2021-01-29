@@ -37,6 +37,7 @@ public:
 	void StreamCopyMT( __m256i* dst, __m256i* src, int N );
 	void Sphere( const float x, const float y, const float z, const float r, const uint c );
 	void HDisc( const float x, const float y, const float z, const float r, const uint c );
+	void Print( const char* text, const uint x, const uint y, const uint z, const uint c );
 	void Render();
 	~World();
 	__forceinline uint Get( const uint x, const uint y, const uint z )
@@ -152,11 +153,10 @@ public:
 	uint tasks = 0;						// number of changed bricks, to be passed to commit kernel
 	bool copyInFlight = false;			// flag for skipping async copy on first iteration
 	bool commitInFlight = false;		// flag to make next commit wait for previous to complete
-	// data for the pinned-memory commit buffer
 	cl_mem pinned = 0;					// host-side buffer for fast transfer of commits to GPU
 	cl_mem devmem = 0;					// device-side commit buffer
-	// 3D top-level texture
 	cl_mem gridMap;						// host-side 3D image for top-level
+	Surface* font;						// bitmap font for print command
 };
 
 } // namespace Tmpl8
