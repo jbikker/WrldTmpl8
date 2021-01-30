@@ -24,10 +24,10 @@ extern "C"
 
 static GLFWwindow* window = 0;
 static bool hasFocus = true, running = true;
-static Game* game = 0;
 static GLTexture* renderTarget = 0;
 static int scrwidth = 0, scrheight = 0;
 static World* world = 0;
+extern Game* game;
 
 // world access
 World* GetWorld() { return world; }
@@ -109,7 +109,6 @@ void main()
 	glfwShowWindow( window );
 #endif
 	// initialize game
-	game = new Game();
 	ReshapeWindowCallback( 0, SCRWIDTH, SCRHEIGHT );
 	Shader* shader = new Shader(
 		"#version 330\nin vec4 p;\nin vec2 t;out vec2 u;void main(){u=t;gl_Position=p;}",
