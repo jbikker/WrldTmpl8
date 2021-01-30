@@ -315,7 +315,7 @@ void World::Commit()
 		dst += BRICKSIZE, tasks++;
 	}
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
-	if (tasks > 0)
+	if (tasks > 0 || firstFrame)
 	{
 		static const uint commitSize = BRICKCOMMITSIZE / 4 + gridSize;
 		static uint* dst = 0;
@@ -333,6 +333,7 @@ void World::Commit()
 		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
 		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
 		copyInFlight = true;
+		firstFrame = false;
 	}
 	// reset the bitfield for the next frame
 	ClearMarks();

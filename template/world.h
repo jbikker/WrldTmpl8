@@ -134,7 +134,7 @@ public:
 	uint* modified = 0;					// bitfield to mark bricks for synchronization
 	BrickInfo* brickInfo = 0;			// maintenance data for bricks: zeroes, location
 	volatile inline static LONG trashHead = BRICKCOUNT;	// thrash circular buffer tail
-	volatile inline static LONG trashTail = 0;		// thrash circular buffer tail
+	volatile inline static LONG trashTail = 0;	// thrash circular buffer tail
 	uint* trash = 0;					// indices of recycled bricks
 	Buffer* commitBuffer;				// CPU to GPU pipe
 	uint* commit = 0;					// pointer to CPU-side storage of changes
@@ -157,6 +157,7 @@ public:
 	cl_mem devmem = 0;					// device-side commit buffer
 	cl_mem gridMap;						// host-side 3D image for top-level
 	Surface* font;						// bitmap font for print command
+	bool firstFrame = true;				// for doing things in the first frame
 };
 
 } // namespace Tmpl8
