@@ -1,6 +1,7 @@
 # BRIEF INFO ON THE 2021 WORLD TEMPLATE
 
 *Purpose:*
+
 This template has been designed to make it easy to start coding C++
 using games and 3D graphics. The world is 3D, but consists of a
 finite amount of 'voxels' (3D pixels): exactly 1024x1024x1024 are
@@ -13,6 +14,7 @@ are welcome to dive deep into the template code, to change it as
 you wish, once you are ready to do so.
 
 *Copyright*
+
 This code is completely free to use and distribute in any form.
 
 Utrecht, 2015-2021, Utrecht University
@@ -21,5 +23,6 @@ Jacco Bikker
 Report problems and suggestions to bikker.j@gmail.com.
 
 *Changelog*
+
 v2021-01: 
 initial 3D template release.
