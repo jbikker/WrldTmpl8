@@ -11,8 +11,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectName>froggerGame</ProjectName>
-    <ProjectGuid>{80EDC5CC-0B50-4908-B9A0-0DE7891802F1}</ProjectGuid>
+    <ProjectName>myGame</ProjectName>
+    <ProjectGuid>{1B482D44-6893-42E7-ADF6-E497E4FCE916}</ProjectGuid>
     <RootNamespace>Tmpl8</RootNamespace>
     <Keyword>Win32Proj</Keyword>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
@@ -121,10 +121,7 @@
   </ItemDefinitionGroup>
   <!-- END Custom section -->
   <ItemGroup>
-    <ClCompile Include="frogger.cpp">
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">precomp.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">precomp.h</PrecompiledHeaderFile>
-    </ClCompile>
+    <ClCompile Include="mygame.cpp" />
     <ClCompile Include="template\template.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">precomp.h</PrecompiledHeaderFile>
@@ -137,7 +134,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="frogger.h" />
+    <ClInclude Include="mygame.h" />
     <ClInclude Include="template\bluenoise.h" />
     <ClInclude Include="template\common.h" />
     <ClInclude Include="template\precomp.h" />

@@ -1,12 +1,12 @@
 #include "precomp.h"
-#include "frogger.h"
+#include "mygame.h"
 
-Game* game = new Frogger();
+Game* game = new MyGame();
 
 // -----------------------------------------------------------
 // Initialize the application
 // -----------------------------------------------------------
-void Frogger::Init()
+void MyGame::Init()
 {
 	ShowCursor( false );
 	// default scene is a box; poke a hole in the ceiling
@@ -16,7 +16,7 @@ void Frogger::Init()
 // -----------------------------------------------------------
 // Main application tick function
 // -----------------------------------------------------------
-void Frogger::Tick( float deltaTime )
+void MyGame::Tick( float deltaTime )
 {
 	World* world = GetWorld();
 	world->SetCameraMatrix( mat4::LookAt( make_float3( 512, 128, 512 ), make_float3( ballPos.x, 64, ballPos.z ) ) );

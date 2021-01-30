@@ -1,4 +1,4 @@
-#include "template.h"
+#include "precomp.h"
 #include "bounce.h"
 
 Game* game = new Bouncer();

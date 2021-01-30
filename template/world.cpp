@@ -1,4 +1,4 @@
-#include "template.h"
+#include "precomp.h"
 #include "bluenoise.h"
 
 using namespace Tmpl8;

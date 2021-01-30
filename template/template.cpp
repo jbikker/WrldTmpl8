@@ -1,7 +1,7 @@
 // Template, IGAD version 2
 // IGAD/NHTV/UU - Jacco Bikker - 2006-2020
 
-#include "template.h"
+#include "precomp.h"
 
 #pragma comment( linker, "/subsystem:windows /ENTRY:mainCRTStartup" )
 
