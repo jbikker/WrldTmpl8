@@ -17,24 +17,6 @@ void Bouncer::Init()
 }
 
 // -----------------------------------------------------------
-// Handle mouse movement
-// -----------------------------------------------------------
-static float3 camPos = make_float3( 512, 128, 512 );
-mat4 Bouncer::MouseLook()
-{
-	static bool firstMouse = true;
-	static float yaw = 0, pitch = 0, sensitivity = 0.004f;
-	POINT mouse;
-	GetCursorPos( &mouse );
-	float2 offset = make_float2( make_int2( mouse.x, mouse.y ) - make_int2( SCRWIDTH / 2, SCRHEIGHT / 2 ) );
-	SetCursorPos( SCRWIDTH / 2, SCRHEIGHT / 2 );
-	yaw += offset.x * sensitivity, pitch += offset.y * sensitivity;
-	if (pitch > TWOPI) pitch -= TWOPI; else if (pitch < 0) pitch += TWOPI;
-	if (yaw > TWOPI) yaw -= TWOPI; else if (yaw < 0) yaw += TWOPI;
-	return mat4::Translate( camPos ) * mat4::RotateY( yaw ) * mat4::RotateX( pitch );
-}
-
-// -----------------------------------------------------------
 // Main application tick function
 // -----------------------------------------------------------
 void Bouncer::Tick( float deltaTime )
@@ -53,8 +35,6 @@ void Bouncer::Tick( float deltaTime )
 		for( int y = max( 1, h1 ); y < h2; y++ ) world->Set( x, y, z, GREY );
 		world->Set( x, 0, z, LIGHTBLUE );
 	}
-	world->Print( "Hello World!", 800, 80, 5, 1 );
-	world->Print( "Hello World!", 800, 80, 1020, 1 );
 	// grow tree
 	uint r = tr - (tree / 26);
 	if (tree > -1 && r > 1) 
