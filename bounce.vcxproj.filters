@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="game.cpp" />
+    <ClCompile Include="template\template.cpp">
+      <Filter>template</Filter>
+    </ClCompile>
+    <ClCompile Include="template\world.cpp">
+      <Filter>template</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="game.h" />
+    <ClInclude Include="template\bluenoise.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="template\common.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="template\template.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="template\world.h">
+      <Filter>template</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="cl\kernels.cl">
+      <Filter>template</Filter>
+    </None>
+    <None Include="template\LICENSE">
+      <Filter>template</Filter>
+    </None>
+    <None Include="README.md">
+      <Filter>template</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="template">
+      <UniqueIdentifier>{615be237-1f28-43c4-91ca-67e6846b119e}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

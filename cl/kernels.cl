@@ -1,4 +1,4 @@
-#include "common.h"
+#include "template/common.h"
 
 // internal stuff
 #define dot3(A,B)	A.x*B.x+A.y*B.y+A.z*B.z		// used in case A or B is stored in a vec4
@@ -26,7 +26,7 @@ float4 FixZeroDeltas( float4 V )
 }
 
 // mighty two-level grid traversal
-uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid /* __global const uint* grid */, __global const unsigned char* brick, int steps )
+uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, __global const unsigned char* brick, int steps )
 {
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
 	uint4 pos = (uint4)(clamp( (int)A.x, 0, MAPWIDTH - 1 ), clamp( (int)A.y, 0, MAPHEIGHT - 1 ), clamp( (int)A.z, 0, MAPDEPTH - 1 ), 0);
@@ -38,11 +38,7 @@ uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_on
 	uint last = 0;
 	while (true)
 	{
-	#if 1
 		const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0 ) ).x;
-	#else
-		const uint o = grid[pos.x / BRICKDIM + (pos.z / BRICKDIM) * GRIDWIDTH + (pos.y / BRICKDIM) * GRIDWIDTH * GRIDDEPTH];
-	#endif
 		if (o != 0) if ((o & 1) == 0) /* solid */ 
 		{ 
 			*dist = t, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
@@ -128,7 +124,7 @@ float blueNoiseSampler( const __global uint* blueNoise, int x, int y, int sample
 #define GIRAYS	8
 
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
-	__read_only image3d_t grid /* __global uint* grid */, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise )
+	__read_only image3d_t grid, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise )
 {
 	// produce primary ray for pixel
 	const int column = get_global_id( 0 );

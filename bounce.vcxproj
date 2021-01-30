@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectName>wrldtmpl8</ProjectName>
+    <ProjectName>bounceWorld</ProjectName>
     <ProjectGuid>{D8FE2186-4BF0-4B89-913F-6C26818E5AC5}</ProjectGuid>
     <RootNamespace>Tmpl8</RootNamespace>
     <Keyword>Win32Proj</Keyword>
@@ -125,28 +125,28 @@
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">template.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">template.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="template.cpp">
-      <PrecompiledHeader>Create</PrecompiledHeader>
+    <ClCompile Include="template\template.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">template.h</PrecompiledHeaderFile>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">template.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="world.cpp">
+    <ClCompile Include="template\world.cpp">
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">template.h</PrecompiledHeaderFile>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">template.h</PrecompiledHeaderFile>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="bluenoise.h" />
-    <ClInclude Include="common.h" />
     <ClInclude Include="game.h" />
-    <ClInclude Include="template.h" />
-    <ClInclude Include="world.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="_readme.txt" />
+    <ClInclude Include="template\bluenoise.h" />
+    <ClInclude Include="template\common.h" />
+    <ClInclude Include="template\template.h" />
+    <ClInclude Include="template\world.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cl\kernels.cl" />
+    <None Include="README.md" />
+    <None Include="template\LICENSE" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
