@@ -7,7 +7,7 @@
     <ClCompile Include="template\world.cpp">
       <Filter>template</Filter>
     </ClCompile>
-    <ClCompile Include="bounce.cpp" />
+    <ClCompile Include="frogger.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="template\bluenoise.h">
@@ -22,7 +22,7 @@
     <ClInclude Include="template\world.h">
       <Filter>template</Filter>
     </ClInclude>
-    <ClInclude Include="bounce.h" />
+    <ClInclude Include="frogger.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cl\kernels.cl">
@@ -37,7 +37,7 @@
   </ItemGroup>
   <ItemGroup>
     <Filter Include="template">
-      <UniqueIdentifier>{615be237-1f28-43c4-91ca-67e6846b119e}</UniqueIdentifier>
+      <UniqueIdentifier>{2956f6c3-2de8-4af3-909a-a1eaf84419ca}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
