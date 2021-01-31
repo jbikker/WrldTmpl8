@@ -2,6 +2,8 @@
 #define SCRWIDTH	1600
 #define SCRHEIGHT	900
 
+#define BITEXPERIMENT	0
+
 // IMPORTANT NOTE ON OPENCL COMPATIBILITY ON OLDER LAPTOPS:
 // Without a GPU, a laptop needs at least a 'Broadwell' Intel CPU (5th gen, 2015):
 // Intel's OpenCL implementation 'NEO' is not available on older devices.
@@ -55,6 +57,7 @@ struct RenderParams
 #define GRIDWIDTH	(MAPWIDTH / BRICKDIM)
 #define GRIDHEIGHT	(MAPHEIGHT / BRICKDIM)
 #define GRIDDEPTH	(MAPDEPTH / BRICKDIM)
+#define GRIDSIZE	(GRIDWIDTH * GRIDHEIGHT * GRIDWIDTH)
 #define BRICKSIZE	(BRICKDIM * BRICKDIM * BRICKDIM)
 #define BRICKCOUNT	((MAPWIDTH / BRICKDIM) * (MAPHEIGHT / BRICKDIM) * (MAPDEPTH / BRICKDIM))
 #define BRICKCOMMITSIZE	(MAXCOMMITS * BRICKSIZE + MAXCOMMITS * 4 /* bytes */)

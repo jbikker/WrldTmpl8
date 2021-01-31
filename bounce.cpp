@@ -45,7 +45,7 @@ void Bouncer::Tick( float deltaTime )
 		tx += R(5) - 2, tz += R(5) - 2;
 	}
 	// snow
-	for( int i = 0; i < 3000; i++ )
+	if (0) for( int i = 0; i < 3000; i++ )
 	{
 		world->Set( sx[i], sy[i], sz[i], 0 );
 		if (world->Get( sx[i], --sy[i], sz[i] )) 

@@ -3,13 +3,18 @@
 
 using namespace Tmpl8;
 
+#if BITEXPERIMENT
+static const uint gridSize = GRIDSIZE + (GRIDSIZE >> 5);
+#else
+static const uint gridSize = GRIDSIZE;
+#endif
+static const uint commitSize = BRICKCOMMITSIZE / 4 + gridSize;
+
 // World Constructor
 // ----------------------------------------------------------------------------
 World::World( const uint targetID )
 {
 	// create the commit buffer, used to sync CPU-side changes to the GPU
-	const uint gridSize = GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH;
-	const uint commitSize = BRICKCOMMITSIZE / 4 + gridSize;
 	commit = (uint*)_aligned_malloc( commitSize * 4, 64 );
 	commitBuffer = new Buffer( commitSize, Buffer::READONLY, commit );
 	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
@@ -37,6 +42,9 @@ World::World( const uint targetID )
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
 	// prepare a test world
 	grid = commit; // for efficiency, the top-level grid resides in the commit buffer
+#if BITEXPERIMENT
+	bitMap = new Buffer( GRIDSIZE / 32, Buffer::READONLY );
+#endif
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
 	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin" );
@@ -60,6 +68,9 @@ World::World( const uint targetID )
 	renderer->SetArgument( 4, sky );
 	committer->SetArgument( 1, &devmem );
 	committer->SetArgument( 2, brickBuffer );
+#if BITEXPERIMENT
+	committer->SetArgument( 3, bitMap );
+#endif
 	// prepare the bluenoise data
 	const uchar* data8 = (const uchar*)sob256_64; // tables are 8 bit per entry
 	uint* data32 = new uint[65536 * 5]; // we want a full uint per entry
@@ -72,6 +83,9 @@ World::World( const uint targetID )
 	blueNoise->CopyToDevice();
 	delete data32;
 	renderer->SetArgument( 5, blueNoise );
+#if BITEXPERIMENT
+	renderer->SetArgument( 6, bitMap );
+#endif
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
 }
@@ -277,7 +291,7 @@ void World::Render()
 		if (tasks > 0) 
 		{
 			committer->SetArgument( 0, (int)tasks );
-			committer->Run( (tasks + 63) & (65536 - 32), 4, &copyDone, &commitDone );
+			committer->Run( max( 4096u, (tasks + 63) & (65536 - 32) ), 4, &copyDone, &commitDone );
 		}
 		copyInFlight = false, commitInFlight = true;
 	}
@@ -302,7 +316,6 @@ void World::Commit()
 {
 	Timer t;
 	t.reset();
-	static const uint gridSize = GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH;
 	uint* idx = commit + gridSize;
 	uchar* dst = (uchar*)(idx + MAXCOMMITS);
 	tasks = 0;
@@ -317,7 +330,6 @@ void World::Commit()
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
 	if (tasks > 0 || firstFrame)
 	{
-		static const uint commitSize = BRICKCOMMITSIZE / 4 + gridSize;
 		static uint* dst = 0;
 		if (dst == 0)
 		{
@@ -326,6 +338,26 @@ void World::Commit()
 			commit = dst + commitSize, grid = commit; // top-level grid resides at the start of the commit buffer
 		}
 		if (commitInFlight) /* wait for the previous commit to complete */ clWaitForEvents( 1, &commitDone );
+	#if BITEXPERIMENT
+		// populate bitgrid
+		for( uint i = 0; i < (GRIDSIZE / 32); i++ )
+		{
+			uint blockBits = 0; // each uint stores bits for a 4x2x4=32 block
+			const uint bx = i & (GRIDWIDTH / 4 - 1);
+			const uint by = (i / (GRIDWIDTH / 4)) & (GRIDDEPTH / 4 - 1);
+			const uint bz = (i / ((GRIDWIDTH / 4) * (GRIDHEIGHT / 2)));
+			for( uint b = 0; b < 32; b++ )
+			{
+				const uint lx = b & 3;
+				const uint ly = (b >> 2) & 1;
+				const uint lz = (b >> 3) & 3;
+				if (grid[(bx * 4 + lx) + (bz * 4 + lz) * GRIDWIDTH + (by * 2 + ly) * GRIDWIDTH * GRIDDEPTH])
+					blockBits += 1 << b;
+			}
+			commit[GRIDSIZE + i] = blockBits;
+		}
+	#endif
+		// copy commit buffer to start of pinned buffer for final DMA transfer
 		StreamCopyMT( (__m256i*)dst, (__m256i*)commit, commitSize / 8 );
 		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, commitSize * 4, dst, 0, 0, 0 );
 		// copy the top-level grid to a 3D OpenCL image buffer (vram to vram)

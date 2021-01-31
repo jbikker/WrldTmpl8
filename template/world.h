@@ -129,6 +129,10 @@ public:
 	// data members
 	mat4 camMat;						// camera matrix to be used for rendering
 	uint* grid = 0;						// pointer to host-side copy of the top-level grid
+#if BITEXPERIMENT
+	Buffer* bitMap = 0;					// compact bit set for the grid, where '1' is not empty
+	uint* bits = 0;						// host side copy of the bits
+#endif
 	Buffer* brickBuffer;				// OpenCL buffer for the bricks
 	uchar* brick = 0;					// pointer to host-side copy of the bricks
 	uint* modified = 0;					// bitfield to mark bricks for synchronization
