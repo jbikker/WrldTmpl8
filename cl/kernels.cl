@@ -26,11 +26,7 @@ float4 FixZeroDeltas( float4 V )
 }
 
 // mighty two-level grid traversal
-uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, __global const unsigned char* brick, int steps
-#if BITEXPERIMENT
-	, __global const uint* bitMap
-#endif
-)
+uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, __global const unsigned char* brick, int steps )
 {
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
 	uint4 pos = (uint4)(clamp( (int)A.x, 0, MAPWIDTH - 1 ), clamp( (int)A.y, 0, MAPHEIGHT - 1 ), clamp( (int)A.z, 0, MAPDEPTH - 1 ), 0);
@@ -42,53 +38,37 @@ uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_on
 	uint last = 0, bit32 = 0, bit32Idx = 0x7ffffff;
 	while (true)
 	{
-	#if BITEXPERIMENT
-		// check bit
-		const uint newIdx = (pos.x >> 5) + ((pos.y >> 4) << 5) + ((pos.z >> 5) << 11);
-		if (newIdx != bit32Idx)
-		{
-			bit32Idx = newIdx;
-			bit32 = bitMap[newIdx];
+		// check main grid
+		const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0 ) ).x;
+		if (o != 0) if ((o & 1) == 0) /* solid */ 
+		{ 
+			*dist = t, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
+			return o >> 1; 
 		}
-		const uint lx = (pos.x / BRICKDIM) & 3;
-		const uint ly = (pos.y / BRICKDIM) & 1;
-		const uint lz = (pos.z / BRICKDIM) & 3;
-		const uint bitIdx = ((pos.x >> 3) & 3) + (((pos.y >> 3) & 1) << 2) + (((pos.z >> 3) & 3) << 3);
-		if (bit32 & (1 << bitIdx))
-	#endif
+		else // brick
 		{
-			// check main grid
-			const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0 ) ).x;
-			if (o != 0) if ((o & 1) == 0) /* solid */ 
-			{ 
-				*dist = t, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
-				return o >> 1; 
-			}
-			else // brick
+			const float4 I = A + V * t;
+			uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) + 
+						(clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) + 
+						clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
+			const uint pn = p & TOPMASK3;
+			float dmx = (float)((p >> 20) + OFFS_X - A.x) * rV.x;
+			float dmy = (float)(((p >> 10) & 1023) + OFFS_Y - A.y) * rV.y;
+			float dmz = (float)((p & 1023) + OFFS_Z - A.z) * rV.z, d = t;
+			do
 			{
-				const float4 I = A + V * t;
-				uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) + 
-						 (clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) + 
-						  clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
-				const uint pn = p & TOPMASK3;
-				float dmx = (float)((p >> 20) + OFFS_X - A.x) * rV.x;
-				float dmy = (float)(((p >> 10) & 1023) + OFFS_Y - A.y) * rV.y;
-				float dmz = (float)((p & 1023) + OFFS_Z - A.z) * rV.z, d = t;
-				do
-				{
-					const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
-					const unsigned int color = brick[idx];
-					if (color != 0U) 
-					{ 
-						*dist = d, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
-						return color; 
-					}
-					d = min( dmx, min( dmy, dmz ) );
-					if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
-					if (d == dmy) dmy += tdy, p += DIR_Y << 10, last = 1;
-					if (d == dmz) dmz += tdz, p += DIR_Z, last = 2;
-				} while ((p & TOPMASK3) == pn);
-			}
+				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+				const unsigned int color = brick[idx];
+				if (color != 0U) 
+				{ 
+					*dist = d, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
+					return color; 
+				}
+				d = min( dmx, min( dmy, dmz ) );
+				if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
+				if (d == dmy) dmy += tdy, p += DIR_Y << 10, last = 1;
+				if (d == dmz) dmz += tdz, p += DIR_Z, last = 2;
+			} while ((p & TOPMASK3) == pn);
 		}
 		if (!--steps) break;
 		t = min( tmx, min( tmy, tmz ) );
@@ -145,11 +125,7 @@ float blueNoiseSampler( const __global uint* blueNoise, int x, int y, int sample
 #define GIRAYS	8
 
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
-	__read_only image3d_t grid, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise
-#if BITEXPERIMENT
-	, __global const uint* bitMap
-#endif
-)
+	__read_only image3d_t grid, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise )
 {
 	// produce primary ray for pixel
 	const int column = get_global_id( 0 );
@@ -161,11 +137,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	// trace primary ray
 	float dist;
 	float3 N;
-#if BITEXPERIMENT
-	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick, 256, bitMap );
-#else
 	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick, 256 );
-#endif
 
 	// visualize result
 	float3 pixel;
@@ -192,11 +164,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 			const float4 R = (float4)( DiffuseReflectionCosWeighted( r0, r1, N ), 1 );
 			float3 N2;
 			float dist2;
-		#if BITEXPERIMENT
-			const uint voxel2 = TraceRay( I + 0.1f * (float4)( N, 1 ), R, &dist2, &N2, grid, brick, 10, bitMap );
-		#else
 			const uint voxel2 = TraceRay( I + 0.1f * (float4)( N, 1 ), R, &dist2, &N2, grid, brick, 10 );
-		#endif
 			if (voxel2 == 0)
 			{
 				// sky
@@ -210,17 +178,32 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 			{
 				float3 BRDF2 = INVPI * (float3)((voxel2 >> 5) * (1.0f / 7.0f), ((voxel2 >> 2) & 7) * (1.0f / 7.0f), (voxel2 & 3) * (1.0f / 3.0f));
 				// secondary hit
+			#if 1
+				incoming += BRDF2 * 2 * (
+					(N2.x * N2.x) * ((-N2.x + 1) * (float3)(NX0) + (N2.x + 1) * (float3)(NX1)) +
+					(N2.y * N2.y) * ((-N2.y + 1) * (float3)(NY0) + (N2.y + 1) * (float3)(NY1)) +
+					(N2.z * N2.z) * ((-N2.z + 1) * (float3)(NZ0) + (N2.z + 1) * (float3)(NZ1))
+				);
+			#else
 				if (N2.x == -1) incoming += BRDF2 * (float3)(NX0) * 4;
 				if (N2.x ==  1) incoming += BRDF2 * (float3)(NX1) * 4;
 				if (N2.y == -1) incoming += BRDF2 * (float3)(NY0) * 4;
 				if (N2.y ==  1) incoming += BRDF2 * (float3)(NY1) * 4;
 				if (N2.z == -1) incoming += BRDF2 * (float3)(NZ0) * 4;
 				if (N2.z ==  1) incoming += BRDF2 * (float3)(NZ1) * 4;
+			#endif
 			}
 		}
 		pixel = BRDF1 * incoming * (1.0f / GIRAYS);
 	#else
 		// hardcoded lights - image based lighting, no visibility test
+	#if 1
+		pixel = BRDF1 * 2 * (
+			(N.x * N.x) * ((-N.x + 1) * (float3)(NX0) + (N.x + 1) * (float3)(NX1)) +
+			(N.y * N.y) * ((-N.y + 1) * (float3)(NY0) + (N.y + 1) * (float3)(NY1)) +
+			(N.z * N.z) * ((-N.z + 1) * (float3)(NZ0) + (N.z + 1) * (float3)(NZ1))
+		);
+	#else
 		if (N.x == -1) pixel = (float3)(NX0) * 4;
 		if (N.x ==  1) pixel = (float3)(NX1) * 4;
 		if (N.y == -1) pixel = (float3)(NY0) * 4;
@@ -229,41 +212,25 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 		if (N.z ==  1) pixel = (float3)(NZ1) * 4;
 		pixel *= BRDF1;
 	#endif
+	#endif
 	}
 	write_imagef( outimg, (int2)(column, line), (float4)( pixel, 1 ) );
 }
 
-__kernel void commit( const int taskCount, __global uint* commit, __global uint* brick 
-#if BITEXPERIMENT
-	, __global uint4* bitMap
-#endif
-)
+__kernel void commit( const int taskCount, __global uint* commit, __global uint* brick )
 {
 	// put bricks in place
 	int task = get_global_id( 0 );
 	if (task < taskCount)
 	{
-	#if BITEXPERIMENT
-		int brickId = commit[task + GRIDSIZE + (GRIDSIZE >> 5)];
-		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + (GRIDSIZE >> 5) + task * BRICKSIZE / 4;
-	#else
 		int brickId = commit[task + GRIDSIZE];
 		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + task * BRICKSIZE / 4;
-	#endif
 		__global uint* dst = brick + brickId * BRICKSIZE / 4;
 		for (int i = 0; i < BRICKSIZE / 4; i++) dst[i] = src[i];
 	}
-#if BITEXPERIMENT
-	// put bit map in place
-	if (task < 4096)
-	{
-		bitMap[task * 4 + 0] = ((__global uint4*)(commit + GRIDSIZE))[task * 4 + 0];
-		bitMap[task * 4 + 1] = ((__global uint4*)(commit + GRIDSIZE))[task * 4 + 1];
-		bitMap[task * 4 + 2] = ((__global uint4*)(commit + GRIDSIZE))[task * 4 + 2];
-		bitMap[task * 4 + 3] = ((__global uint4*)(commit + GRIDSIZE))[task * 4 + 3];
-	}
-#endif
 }
+
+// Notes
 
 // Reprojection, according to Lighthouse 2:
 // float3 D = normalize( localWorldPos - prevPos );
@@ -284,3 +251,8 @@ __kernel void commit( const int taskCount, __global uint* commit, __global uint*
 // float4 prevE = make_float4( direction, 0 )
 // float4 prevRight = make_float4( right * lenReci, dot( prevView.p1, right ) * lenReci )
 // float4 prevUp = make_float4( up * lenReci, dot( prevView.p1, up ) * lenReci )
+
+// Faster empty space skipping:
+// bits for empty top-level grid cells didn't work.
+// Try instead: https://www.kalojanov.com/data/irregular_grid.pdf
+// as suggested by Guillaume Boissé.

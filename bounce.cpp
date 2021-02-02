@@ -14,6 +14,9 @@ void Bouncer::Init()
 	// init snow
 	for( int i = 0; i < 3000; i++ ) 
 		sx[i] = RandomUInt() % 1000 + 12, sy[i] = RandomUInt() % 1000 + 3, sz[i] = RandomUInt() % 1000 + 12;
+	// add teapot
+	GetWorld()->LoadSprite( "assets/teapot.vox" );
+	GetWorld()->DrawSprite( 0, 200, 50, 200 );
 }
 
 // -----------------------------------------------------------

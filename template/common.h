@@ -2,8 +2,6 @@
 #define SCRWIDTH	1600
 #define SCRHEIGHT	900
 
-#define BITEXPERIMENT	0
-
 // IMPORTANT NOTE ON OPENCL COMPATIBILITY ON OLDER LAPTOPS:
 // Without a GPU, a laptop needs at least a 'Broadwell' Intel CPU (5th gen, 2015):
 // Intel's OpenCL implementation 'NEO' is not available on older devices.
@@ -12,6 +10,7 @@
 // TODO:
 // - The size of the commit buffer affects performance. Tweak how much is sent per frame.
 // - If we have enough bricks for the full map, each brick pos can point to a fixed brick.
+// - An irregular grid may be faster.
 // - Add TAA and GI. :)
 
 // settings shared between c/c++ and OpenCL

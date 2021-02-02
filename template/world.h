@@ -8,38 +8,37 @@ namespace Tmpl8
 
 struct BrickInfo { uint zeroes; /* , location; */ };
 
+class Sprite
+{
+public:
+	unsigned char* buffer;
+	int3 size;
+};
+
 class World
 {
-	class CopyJob : public Job
-	{
-	public:
-		void Main() { World::StreamCopy( dst, src, N ); }
-		__m256i* dst, * src;
-		int N;
-	};
 public:
+	// constructor / destructor
 	World( const uint targetID );
+	~World();
+	// initialization
+	void Clear();
+	void DummyWorld();
+	void LoadSky( const char* filename, const char* bin_name );
+	// camera
 	void SetCameraMatrix( const mat4& m ) { camMat = m; }
 	float3 GetCameraViewDir() { return make_float3( camMat[2], camMat[6], camMat[10] ); }
 	mat4& GetCameraMatrix() { return camMat; }
-	void DummyWorld();
-	void Clear();
-	void LoadSky( const char* filename, const char* bin_name );
-	static void StreamCopy( __m256i* dst, const __m256i* src, int N )
-	{
-		// https://stackoverflow.com/questions/2963898/faster-alternative-to-memcpy
-		for (; N > 0; N--, src++, dst++)
-		{
-			const __m256i d = _mm256_stream_load_si256( src );
-			_mm256_stream_si256( dst, d );
-		}
-	}
-	void StreamCopyMT( __m256i* dst, __m256i* src, int N );
+	// render flow
+	void Commit();
+	void Render();
+	// high-level voxel access
 	void Sphere( const float x, const float y, const float z, const float r, const uint c );
 	void HDisc( const float x, const float y, const float z, const float r, const uint c );
 	void Print( const char* text, const uint x, const uint y, const uint z, const uint c );
-	void Render();
-	~World();
+	int LoadSprite( const char* file );
+	void DrawSprite( const int idx, const uint x, const uint y, const uint z );
+	// low-level voxel access
 	__forceinline uint Get( const uint x, const uint y, const uint z )
 	{
 		// calculate brick location in top-level grid
@@ -52,10 +51,6 @@ public:
 		// calculate the position of the voxel inside the brick
 		const uint lx = x & (BRICKDIM - 1), ly = y & (BRICKDIM - 1), lz = z & (BRICKDIM - 1);
 		return brick[(g >> 1) * BRICKSIZE + lx + ly * BRICKDIM + lz * BRICKDIM * BRICKDIM];
-	}
-	__forceinline void Set8( const uint x, const uint y, const uint z, const uint v /* actually an 8-bit value */ )
-	{
-		grid[x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH] = v << 1;
 	}
 	__forceinline void Set( const uint x, const uint y, const uint z, const uint v /* actually an 8-bit value */ )
 	{
@@ -125,14 +120,28 @@ public:
 	bool IsDirty( const uint idx ) { return (modified[idx >> 5] & (1 << (idx & 31))) > 0; }
 	bool IsDirty32( const uint idx ) { return modified[idx] != 0; }
 	void ClearMarks() { memset( modified, 0, (BRICKCOUNT / 32) * 4 ); }
-	void Commit();
+	// helpers
+	static void StreamCopy( __m256i* dst, const __m256i* src, int N )
+	{
+		// https://stackoverflow.com/questions/2963898/faster-alternative-to-memcpy
+		for (; N > 0; N--, src++, dst++)
+		{
+			const __m256i d = _mm256_stream_load_si256( src );
+			_mm256_stream_si256( dst, d );
+		}
+	}
+	void StreamCopyMT( __m256i* dst, __m256i* src, int N );
+	// helper class for multithreaded memcpy
+	class CopyJob : public Job
+	{
+	public:
+		void Main() { World::StreamCopy( dst, src, N ); }
+		__m256i* dst, * src;
+		int N;
+	};
 	// data members
 	mat4 camMat;						// camera matrix to be used for rendering
 	uint* grid = 0;						// pointer to host-side copy of the top-level grid
-#if BITEXPERIMENT
-	Buffer* bitMap = 0;					// compact bit set for the grid, where '1' is not empty
-	uint* bits = 0;						// host side copy of the bits
-#endif
 	Buffer* brickBuffer;				// OpenCL buffer for the bricks
 	uchar* brick = 0;					// pointer to host-side copy of the bricks
 	uint* modified = 0;					// bitfield to mark bricks for synchronization
@@ -162,6 +171,7 @@ public:
 	cl_mem gridMap;						// host-side 3D image for top-level
 	Surface* font;						// bitmap font for print command
 	bool firstFrame = true;				// for doing things in the first frame
+	vector<Sprite*> sprite;				// list of loaded sprites
 };
 
 } // namespace Tmpl8
