@@ -129,6 +129,7 @@ public:
 	}
 	bool IsDirty( const uint idx ) { return (modified[idx >> 5] & (1 << (idx & 31))) > 0; }
 	bool IsDirty32( const uint idx ) { return modified[idx] != 0; }
+	void ClearMarks32( const uint idx ) { modified[idx] = 0; }
 	void ClearMarks() { memset( modified, 0, (BRICKCOUNT / 32) * 4 ); }
 	// helpers
 	static void StreamCopy( __m256i* dst, const __m256i* src, const uint bytes )

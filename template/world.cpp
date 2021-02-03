@@ -3,7 +3,7 @@
 
 using namespace Tmpl8;
 
-static const uint gridSize = GRIDSIZE * sizeof( uint);
+static const uint gridSize = GRIDSIZE * sizeof( uint );
 static const uint commitSize = BRICKCOMMITSIZE + gridSize;
 
 // World Constructor
@@ -306,7 +306,7 @@ uint World::LoadSprite( const char* file )
 			fread( &N, 1, 4, f );
 			frame.buffer = new unsigned char[s.x * s.y * s.z];
 			memset( frame.buffer, 0, s.x * s.y * s.z );
-			for( uint i = 0; i < N; i++ )
+			for (uint i = 0; i < N; i++)
 			{
 				fread( &p, 1, 4, f );
 				frame.buffer[(p & 255) + ((p >> 16) & 255) * s.x + ((p >> 8) & 255) * s.x * s.y] = p >> 24;
@@ -314,7 +314,7 @@ uint World::LoadSprite( const char* file )
 			if (newSprite.frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", file );
 			newSprite.frame.push_back( frame );
 		}
-		else if (!strncmp( header.name, "RGBA", 4 )) 
+		else if (!strncmp( header.name, "RGBA", 4 ))
 		{
 			fread( palette, 4, 256, f );
 		}
@@ -328,10 +328,10 @@ uint World::LoadSprite( const char* file )
 	fclose( f );
 	// finalize new sprite
 	int3 maxSize = make_int3( 0 );
-	for( int i = 0; i < frameCount; i++ )
+	for (int i = 0; i < frameCount; i++)
 	{
 		SpriteFrame& f = newSprite.frame[i];
-		for( int s = f.size.x * f.size.y * f.size.z, i = 0; i < s; i++ ) if (f.buffer[i])
+		for (int s = f.size.x * f.size.y * f.size.z, i = 0; i < s; i++) if (f.buffer[i])
 		{
 			const uint c = palette[f.buffer[i]];
 			const uint blue = ((c >> 16) & 255) >> 6, green = ((c >> 8) & 255) >> 5, red = (c & 255) >> 5;
@@ -391,7 +391,7 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 	{
 		const SpriteFrame& b = sprite[idx].backup;
 		const int3 s = b.size;
-		for( int i = 0, w = 0; w < s.z; w++ ) for( int v = 0; v < s.y; v++ ) for( int u = 0; u < s.x; u++, i++ )
+		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
 		{
 			const uint voxel = b.buffer[i];
 			Set( l.x + u, l.y + v, l.z + w, b.buffer[i] );
@@ -402,7 +402,7 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 	SpriteFrame& b = sprite[idx].backup;
 	const int3& s = f.size;
 	b.size = s;
-	for( int i = 0, w = 0; w < s.z; w++ ) for( int v = 0; v < s.y; v++ ) for( int u = 0; u < s.x; u++, i++ )
+	for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
 	{
 		const uint voxel = f.buffer[i];
 		b.buffer[i] = Get( x + u, y + v, z + w );
@@ -472,13 +472,18 @@ void World::Commit()
 	uint* idx = commit + gridSize / 4;
 	uchar* dst = (uchar*)(idx + MAXCOMMITS);
 	tasks = 0;
-	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j )) for (uint k = 0; k < 32; k++)
+	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j )) 
 	{
-		const uint i = j * 32 + k;
-		if (!IsDirty( i )) continue;
-		*idx++ = (uint)i; // store index of modified brick at start of commit buffer
-		StreamCopy( (__m256i*)dst, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
-		dst += BRICKSIZE, tasks++;
+		for (uint k = 0; k < 32; k++)
+		{
+			const uint i = j * 32 + k;
+			if (!IsDirty( i )) continue;
+			*idx++ = (uint)i; // store index of modified brick at start of commit buffer
+			StreamCopy( (__m256i*)dst, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
+			dst += BRICKSIZE, tasks++;
+		}
+		ClearMarks32( j );
+		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
 	}
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
 	if (tasks > 0 || firstFrame)
@@ -501,8 +506,6 @@ void World::Commit()
 		copyInFlight = true;
 		firstFrame = false;
 	}
-	// reset the bitfield for the next frame
-	ClearMarks();
 }
 
 // World::StreamCopyMT
