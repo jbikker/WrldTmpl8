@@ -20,6 +20,7 @@
 // if your CPU does not support this (unlikely), include the appropriate header instead.
 // see: https://stackoverflow.com/a/11228864/2844473
 #include <immintrin.h>
+#include <stdlib.h>
 
 // clang-format off
 
