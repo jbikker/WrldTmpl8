@@ -21,7 +21,7 @@ public:
 	float3 ballPos = make_float3( 300, 100, 300 );
 	float3 ballVel = make_float3( 0.3f, 0, 0.5f );
 	int tree = -1, tx, tz, tr;
-	int sx[4000], sy[4000], sz[4000];
+	int dx[1000], dz[1000], df[1000];
 };
 
 } // namespace Tmpl8

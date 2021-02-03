@@ -11,12 +11,14 @@ void Bouncer::Init()
 	ShowCursor( false );
 	// default scene is a box; poke a hole in the ceiling
 	for (int x = 256; x < 768; x++) for (int z = 256; z < 768; z++) GetWorld()->Set( x, 255, z, 0 );
-	// init snow
-	for( int i = 0; i < 3000; i++ ) 
-		sx[i] = RandomUInt() % 1000 + 12, sy[i] = RandomUInt() % 1000 + 3, sz[i] = RandomUInt() % 1000 + 12;
-	// add teapot
-	GetWorld()->LoadSprite( "assets/teapot.vox" );
-	GetWorld()->DrawSprite( 0, 200, 50, 200 );
+	// init deer flock
+	GetWorld()->LoadSprite( "assets/deer.vox" );
+	for( int i = 0; i < 100; i++ ) 
+	{
+		GetWorld()->CloneSprite( 0 );
+		dx[i] = RandomUInt() % 1000 + 1, dz[i] = RandomUInt() % 1000 + 1;
+		df[i] = RandomUInt() % (GetWorld()->SpriteFrameCount( 0 ) * 4);
+	}
 }
 
 // -----------------------------------------------------------
@@ -47,16 +49,12 @@ void Bouncer::Tick( float deltaTime )
 		if (!(R(15))) world->Sphere( (float)tx + (R(3) - 1) * (3 + r), tree / 2.0f, (float)tz + (R(3) - 1) * (3 + r), R(3) + 3.0f, R(8) ? GREEN : RED );
 		tx += R(5) - 2, tz += R(5) - 2;
 	}
-	// snow
-	if (0) for( int i = 0; i < 3000; i++ )
+	// deer
+	for( int i = 0; i < 100; i++ )
 	{
-		world->Set( sx[i], sy[i], sz[i], 0 );
-		if (world->Get( sx[i], --sy[i], sz[i] )) 
-		{
-			world->Set( sx[i], sy[i], sz[i], WHITE );
-			sx[i] = RandomUInt() % 1000 + 12, sy[i] = 255, sz[i] = RandomUInt() % 1000 + 12;
-		}
-		world->Set( sx[i], sy[i], sz[i], WHITE );
+		world->MoveSpriteTo( i, dx[i], 5, dz[i], df[i] >> 3 );
+		if (++df[i] == world->SpriteFrameCount( 0 ) * 8) df[i] = 0;
+		if (--dx[i] < 15) dx[i] = 990;
 	}
 	// bounce ball
 	world->Sphere( ballPos.x, ballPos.y, ballPos.z, 25, 0 );

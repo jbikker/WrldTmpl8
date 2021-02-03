@@ -248,8 +248,9 @@ void World::Print( const char* text, const uint x, const uint y, const uint z, c
 
 // World::LoadSprite
 // ----------------------------------------------------------------------------
-int World::LoadSprite( const char* file )
+uint World::LoadSprite( const char* file )
 {
+	// attempt to load the .vox file
 	FILE* f = fopen( file, "rb" );
 	if (!f) FatalError( "LoadSprite( %s ):\nFile does not exist.", file );
 	static struct ChunkHeader { char name[4]; int N; union { int M; char mainName[4]; }; } header;
@@ -259,7 +260,7 @@ int World::LoadSprite( const char* file )
 	if (strncmp( header.mainName, "MAIN", 4 )) FatalError( "LoadSprite( %s ):\nNo MAIN chunk.", file );
 	fread( &header.N, 1, 4, f ); // eat MAIN chunk num bytes of chunk content (N)
 	fread( &header.N, 1, 4, f ); // eat MAIN chunk num bytes of children chunks (M)
-	Sprite* newSprite = 0;
+	// initialize the palette to the default palette
 	static uint palette[256];
 	static uint default_palette[256] = {
 		0x00000000, 0xffffffff, 0xffccffff, 0xff99ffff, 0xff66ffff, 0xff33ffff, 0xff00ffff, 0xffffccff, 0xffccccff, 0xff99ccff, 0xff66ccff, 0xff33ccff, 0xff00ccff, 0xffff99ff, 0xffcc99ff, 0xff9999ff,
@@ -280,34 +281,41 @@ int World::LoadSprite( const char* file )
 		0xff880000, 0xff770000, 0xff550000, 0xff440000, 0xff220000, 0xff110000, 0xffeeeeee, 0xffdddddd, 0xffbbbbbb, 0xffaaaaaa, 0xff888888, 0xff777777, 0xff555555, 0xff444444, 0xff222222, 0xff111111
 	};
 	memcpy( palette, default_palette, 1024 );
+	// create the sprite
+	Sprite newSprite;
+	SpriteFrame frame;
+	int frameCount = 1; // will be overwritten if we encounter a 'PACK' chunk
+	// load chunks
 	while (1)
 	{
 		memset( &header, 0, sizeof( ChunkHeader ) );
 		fread( &header, 1, sizeof( ChunkHeader ), f );
-		if (feof( f )) break;
-		if (header.name[0] == 0) break;
-		else if (!strncmp( header.name, "PACK", 4 )) FatalError( "LoadSprite( %s ):\nCannot load packs.", file );
+		if (feof( f ) || header.name[0] == 0) break; // assume end of file
+		else if (!strncmp( header.name, "PACK", 4 )) fread( &frameCount, 1, 4, f );
 		else if (!strncmp( header.name, "SIZE", 4 ))
 		{
-			sprite.push_back( newSprite = new Sprite() );
-			fread( &newSprite->size, 1, 12, f );
-			swap( newSprite->size.y, newSprite->size.z ); // our y is up, in MagiaVoxel z is up
+			fread( &frame.size, 1, 12, f );
+			swap( frame.size.y, frame.size.z ); // sorry Magica, z=up is just wrong
 		}
 		else if (!strncmp( header.name, "XYZI", 4 ))
 		{
 			uint N, p;
-			int3 s = newSprite->size;
+			int3 s = frame.size;
 			fread( &N, 1, 4, f );
-			if (!newSprite) FatalError( "LoadSprite( %s ):\nXYZI before SIZE chunk.", file );
-			newSprite->buffer = new unsigned char[s.x * s.y * s.z];
-			memset( newSprite->buffer, 0, s.x * s.y * s.z );
+			frame.buffer = new unsigned char[s.x * s.y * s.z];
+			memset( frame.buffer, 0, s.x * s.y * s.z );
 			for( uint i = 0; i < N; i++ )
 			{
 				fread( &p, 1, 4, f );
-				newSprite->buffer[(p & 255) + ((p >> 16) & 255) * s.x + ((p >> 8) & 255) * s.x * s.y] = p >> 24;
+				frame.buffer[(p & 255) + ((p >> 16) & 255) * s.x + ((p >> 8) & 255) * s.x * s.y] = p >> 24;
 			}
+			if (newSprite.frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", file );
+			newSprite.frame.push_back( frame );
 		}
-		else if (!strncmp( header.name, "RGBA", 4 )) fread( palette, 4, 256, f );
+		else if (!strncmp( header.name, "RGBA", 4 )) 
+		{
+			fread( palette, 4, 256, f );
+		}
 		else if (!strncmp( header.name, "MATT", 4 ))
 		{
 			int dummy[8192]; // we are not supporting materials for now.
@@ -315,25 +323,91 @@ int World::LoadSprite( const char* file )
 		}
 		else break; // FatalError( "LoadSprite( %s ):\nUnknown chunk.", file );
 	}
-	if (newSprite) for( int s = newSprite->size.x * newSprite->size.y * newSprite->size.z, i = 0; i < s; i++ )
-	{
-		const uint c = palette[newSprite->buffer[s]];
-		const uint red = ((c >> 16) & 255) >> 5, green = ((c >> 8) & 255) >> 5, blue = (c  & 255) >> 6;
-		newSprite->buffer[s] = (red << 5) + (green << 2) + blue;
-	}
 	fclose( f );
-	return sizeof( sprite ) - 1;
+	// finalize new sprite
+	int3 maxSize = make_int3( 0 );
+	for( int i = 0; i < frameCount; i++ )
+	{
+		SpriteFrame& f = newSprite.frame[i];
+		for( int s = f.size.x * f.size.y * f.size.z, i = 0; i < s; i++ ) if (f.buffer[i])
+		{
+			const uint c = palette[f.buffer[i]];
+			const uint blue = ((c >> 16) & 255) >> 6, green = ((c >> 8) & 255) >> 5, red = (c & 255) >> 5;
+			f.buffer[i] = (red << 5) + (green << 2) + blue;
+		}
+		maxSize.x = max( maxSize.x, f.size.x );
+		maxSize.y = max( maxSize.y, f.size.y );
+		maxSize.z = max( maxSize.z, f.size.z );
+	}
+	// create the backup frame for sprite movement
+	SpriteFrame backupFrame;
+	backupFrame.size = maxSize;
+	backupFrame.buffer = new uchar[maxSize.x * maxSize.y * maxSize.z];
+	newSprite.backup = backupFrame;
+	sprite.push_back( newSprite );
+	// all done, return sprite index
+	return (uint)sprite.size() - 1;
 }
 
-// World::DrawSprite
+// World::CloneSprite
 // ----------------------------------------------------------------------------
-void World::DrawSprite( const int idx, const uint x, const uint y, const uint z )
+uint World::CloneSprite( const uint idx )
 {
+	// clone frame data, wich contain pointers to shared frame data
+	Sprite newSprite;
+	if (idx >= sprite.size()) return 0;
+	newSprite.frame = sprite[idx].frame;
+	// clone backup frame, which will be unique per instance
+	SpriteFrame backupFrame;
+	backupFrame.size = sprite[idx].backup.size;
+	backupFrame.buffer = new uchar[backupFrame.size.x * backupFrame.size.y * backupFrame.size.z];
+	newSprite.backup = backupFrame;
+	sprite.push_back( newSprite );
+	return (uint)sprite.size() - 1;
+}
+
+// World::SpriteFrameCount
+// ----------------------------------------------------------------------------
+uint World::SpriteFrameCount( const uint idx )
+{
+	// out of bounds checks
+	if (idx >= sprite.size()) return 0;
+	// return frame count
+	return (uint)sprite[idx].frame.size();
+}
+
+// World::MoveSpriteTo
+// ----------------------------------------------------------------------------
+void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame )
+{
+	// out of bounds checks
 	if (idx >= sprite.size()) return;
-	const int3 s = sprite[idx]->size;
-	const uchar* b = sprite[idx]->buffer;
+	if (frame >= sprite[idx].frame.size()) return;
+	// restore pixels at previous location
+	const int3 l = sprite[idx].lastPos;
+	if (l.x != -9999)
+	{
+		const SpriteFrame& b = sprite[idx].backup;
+		const int3 s = b.size;
+		for( int i = 0, w = 0; w < s.z; w++ ) for( int v = 0; v < s.y; v++ ) for( int u = 0; u < s.x; u++, i++ )
+		{
+			const uint voxel = b.buffer[i];
+			Set( l.x + u, l.y + v, l.z + w, b.buffer[i] );
+		}
+	}
+	// draw sprite at new location
+	const SpriteFrame& f = sprite[idx].frame[frame];
+	SpriteFrame& b = sprite[idx].backup;
+	const int3& s = f.size;
+	b.size = s;
 	for( int i = 0, w = 0; w < s.z; w++ ) for( int v = 0; v < s.y; v++ ) for( int u = 0; u < s.x; u++, i++ )
-		Set( x + u, y + v, z + w, b[i] );
+	{
+		const uint voxel = f.buffer[i];
+		b.buffer[i] = Get( x + u, y + v, z + w );
+		if (voxel != 0) Set( x + u, y + v, z + w, voxel );
+	}
+	// store last location
+	sprite[idx].lastPos = make_int3( x, y, z );
 }
 
 /*

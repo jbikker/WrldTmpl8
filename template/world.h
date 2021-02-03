@@ -8,11 +8,19 @@ namespace Tmpl8
 
 struct BrickInfo { uint zeroes; /* , location; */ };
 
+class SpriteFrame
+{
+public:
+	uchar* buffer;
+	int3 size;							// size of the sprite over x, y and z
+};
+
 class Sprite
 {
 public:
-	unsigned char* buffer;
-	int3 size;
+	vector<SpriteFrame> frame;			// sprite frames
+	SpriteFrame backup;					// backup of pixels that the sprite overwrote
+	int3 lastPos = make_int3( -9999 );	// location where the backup will be restored to
 };
 
 class World
@@ -36,8 +44,10 @@ public:
 	void Sphere( const float x, const float y, const float z, const float r, const uint c );
 	void HDisc( const float x, const float y, const float z, const float r, const uint c );
 	void Print( const char* text, const uint x, const uint y, const uint z, const uint c );
-	int LoadSprite( const char* file );
-	void DrawSprite( const int idx, const uint x, const uint y, const uint z );
+	uint LoadSprite( const char* file );
+	uint CloneSprite( const uint idx );
+	uint SpriteFrameCount( const uint idx );
+	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame = 0 );
 	// low-level voxel access
 	__forceinline uint Get( const uint x, const uint y, const uint z )
 	{
@@ -171,7 +181,7 @@ public:
 	cl_mem gridMap;						// host-side 3D image for top-level
 	Surface* font;						// bitmap font for print command
 	bool firstFrame = true;				// for doing things in the first frame
-	vector<Sprite*> sprite;				// list of loaded sprites
+	vector<Sprite> sprite;				// list of loaded sprites
 };
 
 } // namespace Tmpl8
