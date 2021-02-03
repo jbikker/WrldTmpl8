@@ -3,20 +3,22 @@
 
 using namespace Tmpl8;
 
-static const uint gridSize = GRIDSIZE;
-static const uint commitSize = BRICKCOMMITSIZE / 4 + gridSize;
+static const uint gridSize = GRIDSIZE * sizeof( uint);
+static const uint commitSize = BRICKCOMMITSIZE + gridSize;
 
 // World Constructor
 // ----------------------------------------------------------------------------
 World::World( const uint targetID )
 {
 	// create the commit buffer, used to sync CPU-side changes to the GPU
-	commit = (uint*)_aligned_malloc( commitSize * 4, 64 );
+	if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
+	commit = (uint*)_aligned_malloc( commitSize, 64 );
 	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
-	// have a pinned buffer for faster transfer
-	Kernel::InitCL();
-	pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 8, 0, 0 );
-	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize * 4, 0, 0 );
+	// have a pinned buffer for faster transfer.
+	// note: we can't use double buffering, since all changes are incremental. So instead,
+	// we reserve twice the pinned mem and copy from the 2nd half to the 1st each frame. 
+	pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 2, 0, 0 );
+	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize, 0, 0 );
 	// store top-level grid in a 3D texture
 	cl_image_format fmt;
 	fmt.image_channel_order = CL_R;
@@ -44,9 +46,9 @@ World::World( const uint targetID )
 	brickBuffer->CopyToDevice();
 	ClearMarks(); // clear 'modified' bit array
 	// report memory usage
-	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)((gridSize * sizeof( uint )) >> 20) );
+	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
 	printf( "Allocated %iMB on CPU and GPU for %ik bricks.\n", (int)((BRICKCOUNT * BRICKSIZE) >> 20), (int)(BRICKCOUNT >> 10) );
-	printf( "Allocated %iMB on CPU and GPU for commits.\n", (int)(commitSize >> 18) );
+	printf( "Allocated %iMB on CPU and GPU for commits.\n", (int)(commitSize >> 20) );
 	printf( "Allocated %iKB on CPU for bitfield.\n", (int)(BRICKCOUNT >> 15) );
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
@@ -467,7 +469,7 @@ void World::Commit()
 {
 	Timer t;
 	t.reset();
-	uint* idx = commit + gridSize;
+	uint* idx = commit + gridSize / 4;
 	uchar* dst = (uchar*)(idx + MAXCOMMITS);
 	tasks = 0;
 	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j )) for (uint k = 0; k < 32; k++)
@@ -475,7 +477,7 @@ void World::Commit()
 		const uint i = j * 32 + k;
 		if (!IsDirty( i )) continue;
 		*idx++ = (uint)i; // store index of modified brick at start of commit buffer
-		StreamCopy( (__m256i*)dst, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE / 8 );
+		StreamCopy( (__m256i*)dst, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
 		dst += BRICKSIZE, tasks++;
 	}
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
@@ -484,14 +486,14 @@ void World::Commit()
 		static uint* dst = 0;
 		if (dst == 0)
 		{
-			dst = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, commitSize * 8, 0, 0, 0, 0 );
-			StreamCopy( (__m256i*)(dst + commitSize), (__m256i*)commit, commitSize / 8 );
-			commit = dst + commitSize, grid = commit; // top-level grid resides at the start of the commit buffer
+			dst = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, commitSize * 2, 0, 0, 0, 0 );
+			StreamCopy( (__m256i*)(dst + commitSize / 4), (__m256i*)commit, commitSize );
+			commit = dst + commitSize / 4, grid = commit; // top-level grid resides at the start of the commit buffer
 		}
 		if (commitInFlight) /* wait for the previous commit to complete */ clWaitForEvents( 1, &commitDone );
 		// copy commit buffer to start of pinned buffer for final DMA transfer
-		StreamCopyMT( (__m256i*)dst, (__m256i*)commit, commitSize / 8 );
-		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, commitSize * 4, dst, 0, 0, 0 );
+		StreamCopyMT( (__m256i*)dst, (__m256i*)commit, commitSize );
+		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, commitSize, dst, 0, 0, 0 );
 		// copy the top-level grid to a 3D OpenCL image buffer (vram to vram)
 		size_t origin[3] = { 0, 0, 0 };
 		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
@@ -506,22 +508,24 @@ void World::Commit()
 // World::StreamCopyMT
 // ----------------------------------------------------------------------------
 #define COPYTHREADS	4
-void World::StreamCopyMT( __m256i* dst, __m256i* src, const int N )
+void World::StreamCopyMT( __m256i* dst, __m256i* src, const uint bytes )
 {
 	// fast copying of large 32-byte aligned / multiple of 32 sized data blocks:
 	// streaming __m256 read/writes, on multiple threads
+	assert( (bytes & 31) == 0 );
+	int N = (int)(bytes / 32);
 	static JobManager* jm = JobManager::GetJobManager();
 	static CopyJob cj[COPYTHREADS];
-	__m256i* s = src, * d = dst;
-	int M = (int)N;
-	for (int i = 0; i < (COPYTHREADS - 1); i++, s += M / COPYTHREADS, d += M / COPYTHREADS)
+	__m256i* s = src;
+	__m256i* d = dst;
+	for (int i = 0; i < (COPYTHREADS - 1); i++, s += N / COPYTHREADS, d += N / COPYTHREADS)
 	{
-		cj[i].dst = d, cj[i].src = s, cj[i].N = M / COPYTHREADS;
+		cj[i].dst = d, cj[i].src = s, cj[i].N = N / COPYTHREADS;
 		jm->AddJob2( &cj[i] );
 	}
 	cj[COPYTHREADS - 1].dst = d;
 	cj[COPYTHREADS - 1].src = s;
-	cj[COPYTHREADS - 1].N = M - (COPYTHREADS - 1) * (M / COPYTHREADS);
+	cj[COPYTHREADS - 1].N = N - (COPYTHREADS - 1) * (N / COPYTHREADS);
 	jm->AddJob2( &cj[COPYTHREADS - 1] );
 	jm->RunJobs();
 }

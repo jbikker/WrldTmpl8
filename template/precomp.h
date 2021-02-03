@@ -1031,8 +1031,6 @@ private:
 	inline static cl_context context; // simplifies some things, but limits us to one device
 	inline static cl_command_queue queue, queue2;
 	inline static char* log = 0;
-protected:
-	inline static bool clinitialized = false; // so the CL Buffer class can access it
 public:
 	inline static bool candoInterop = false;
 };

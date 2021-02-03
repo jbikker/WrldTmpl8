@@ -131,23 +131,25 @@ public:
 	bool IsDirty32( const uint idx ) { return modified[idx] != 0; }
 	void ClearMarks() { memset( modified, 0, (BRICKCOUNT / 32) * 4 ); }
 	// helpers
-	static void StreamCopy( __m256i* dst, const __m256i* src, int N )
+	static void StreamCopy( __m256i* dst, const __m256i* src, const uint bytes )
 	{
 		// https://stackoverflow.com/questions/2963898/faster-alternative-to-memcpy
+		assert( (bytes & 31) == 0 );
+		uint N = bytes / 32;
 		for (; N > 0; N--, src++, dst++)
 		{
 			const __m256i d = _mm256_stream_load_si256( src );
 			_mm256_stream_si256( dst, d );
 		}
 	}
-	void StreamCopyMT( __m256i* dst, __m256i* src, int N );
+	void StreamCopyMT( __m256i* dst, __m256i* src, const uint bytes );
 	// helper class for multithreaded memcpy
 	class CopyJob : public Job
 	{
 	public:
-		void Main() { World::StreamCopy( dst, src, N ); }
+		void Main() { World::StreamCopy( dst, src, N * 32 ); }
 		__m256i* dst, * src;
-		int N;
+		uint N;
 	};
 	// data members
 	mat4 camMat;						// camera matrix to be used for rendering
