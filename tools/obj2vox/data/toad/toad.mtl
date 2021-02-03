@@ -1,0 +1,12 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  Deep Exploration 4.0.10.871 Release
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl toad
+map_Kd BugBack_Diffuse.png
+map_bump BugBack_Displacement.png
+bump BugBack_Displacement.png
+
