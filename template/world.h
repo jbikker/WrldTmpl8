@@ -159,7 +159,6 @@ public:
 	volatile inline static LONG trashHead = BRICKCOUNT;	// thrash circular buffer tail
 	volatile inline static LONG trashTail = 0;	// thrash circular buffer tail
 	uint* trash = 0;					// indices of recycled bricks
-	Buffer* commitBuffer;				// CPU to GPU pipe
 	uint* commit = 0;					// pointer to CPU-side storage of changes
 	Buffer* screen;						// OpenCL buffer that encapsulates the target OpenGL texture
 	Buffer* prevFrame[2];				// storage for the previous frame, for TAA

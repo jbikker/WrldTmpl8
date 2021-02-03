@@ -849,11 +849,7 @@ static cl_int getPlatformID( cl_platform_id* platform )
 // ----------------------------------------------------------------------------
 Buffer::Buffer( unsigned int N, unsigned int t, void* ptr )
 {
-	if (!Kernel::clinitialized)
-	{
-		if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
-		Kernel::clinitialized = true;
-	}
+	if (!Kernel::clinitialized) if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
 	type = t;
 	ownData = false;
 	int rwFlags = CL_MEM_READ_WRITE;
@@ -934,11 +930,7 @@ void Buffer::Clear()
 // ----------------------------------------------------------------------------
 Kernel::Kernel( char* file, char* entryPoint )
 {
-	if (!clinitialized)
-	{
-		if (!InitCL()) FATALERROR( "Failed to initialize OpenCL" );
-		clinitialized = true;
-	}
+	if (!clinitialized) if (!InitCL()) FATALERROR( "Failed to initialize OpenCL" );
 	size_t size;
 	cl_int error;
 	string csText = TextFileRead( file );
@@ -1061,6 +1053,7 @@ bool Kernel::InitCL()
 	queue2 = clCreateCommandQueue( context, devices[deviceUsed], 0 /* or CL_QUEUE_PROFILING_ENABLE */, &error );
 	if (!CHECKCL( error )) return false;
 	// cleanup
+	clinitialized = true;
 	delete devices;
 	return true;
 }

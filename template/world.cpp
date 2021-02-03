@@ -12,9 +12,9 @@ World::World( const uint targetID )
 {
 	// create the commit buffer, used to sync CPU-side changes to the GPU
 	commit = (uint*)_aligned_malloc( commitSize * 4, 64 );
-	commitBuffer = new Buffer( commitSize, Buffer::READONLY, commit );
 	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
 	// have a pinned buffer for faster transfer
+	Kernel::InitCL();
 	pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 8, 0, 0 );
 	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize * 4, 0, 0 );
 	// store top-level grid in a 3D texture
@@ -46,7 +46,7 @@ World::World( const uint targetID )
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)((gridSize * sizeof( uint )) >> 20) );
 	printf( "Allocated %iMB on CPU and GPU for %ik bricks.\n", (int)((BRICKCOUNT * BRICKSIZE) >> 20), (int)(BRICKCOUNT >> 10) );
-	printf( "Allocated %iMB on CPU and GPU for commits.\n", (int)(commitBuffer->size >> 18) );
+	printf( "Allocated %iMB on CPU and GPU for commits.\n", (int)(commitSize >> 18) );
 	printf( "Allocated %iKB on CPU for bitfield.\n", (int)(BRICKCOUNT >> 15) );
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
