@@ -31,6 +31,18 @@ extern Game* game;
 
 // world access
 World* GetWorld() { return world; }
+void Plot( const uint x, const uint y, const uint z, const uint c )
+{
+	world->Set( x, y, z, c );
+}
+void Plot( const uint3 pos, const uint c )
+{
+	world->Set( pos.x, pos.y, pos.z, c );
+}
+void Plot( const int3 pos, const uint c )
+{
+	world->Set( pos.x, pos.y, pos.z, c );
+}
 void Sphere( const float x, const float y, const float z, const float r, const uint c )
 {
 	world->Sphere( x, y, z, r, c );
@@ -395,7 +407,7 @@ void DrawQuad()
 	{
 		// generate buffers
 		static const GLfloat verts[] = { -1, 1, 0, 1, 1, 0, -1, -1, 0, 1, 1, 0, -1, -1, 0, 1, -1, 0 };
-		static const GLfloat uvdata[] = { 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1 };
+		static const GLfloat uvdata[] = { 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1 };
 		GLuint vertexBuffer = CreateVBO( verts, sizeof( verts ) );
 		GLuint UVBuffer = CreateVBO( uvdata, sizeof( uvdata ) );
 		glGenVertexArrays( 1, &vao );
