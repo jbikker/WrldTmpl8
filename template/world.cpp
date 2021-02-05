@@ -12,13 +12,8 @@ World::World( const uint targetID )
 {
 	// create the commit buffer, used to sync CPU-side changes to the GPU
 	if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
-	commit = (uint*)_aligned_malloc( commitSize, 64 );
-	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
-	// have a pinned buffer for faster transfer.
-	// note: we can't use double buffering, since all changes are incremental. So instead,
-	// we reserve twice the pinned mem and copy from the 2nd half to the 1st each frame. 
-	pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 2, 0, 0 );
 	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize, 0, 0 );
+	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
 	// store top-level grid in a 3D texture
 	cl_image_format fmt;
 	fmt.image_channel_order = CL_R;
@@ -39,7 +34,7 @@ World::World( const uint targetID )
 	memset( trash, 0, BRICKCOUNT * 4 );
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
 	// prepare a test world
-	grid = commit; // for efficiency, the top-level grid resides in the commit buffer
+	grid = new uint[GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH];
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
 	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin" );
@@ -48,7 +43,6 @@ World::World( const uint targetID )
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
 	printf( "Allocated %iMB on CPU and GPU for %ik bricks.\n", (int)((BRICKCOUNT * BRICKSIZE) >> 20), (int)(BRICKCOUNT >> 10) );
-	printf( "Allocated %iMB on CPU and GPU for commits.\n", (int)(commitSize >> 20) );
 	printf( "Allocated %iKB on CPU for bitfield.\n", (int)(BRICKCOUNT >> 15) );
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
@@ -83,7 +77,6 @@ World::World( const uint targetID )
 // ----------------------------------------------------------------------------
 World::~World()
 {
-	_aligned_free( commit );
 	_aligned_free( brick );
 }
 
@@ -250,18 +243,18 @@ void World::Print( const char* text, const uint x, const uint y, const uint z, c
 
 // World::LoadSprite
 // ----------------------------------------------------------------------------
-uint World::LoadSprite( const char* file )
+uint World::LoadSprite( const char* fileName )
 {
 	// attempt to load the .vox file
-	FILE* f = fopen( file, "rb" );
-	if (!f) FatalError( "LoadSprite( %s ):\nFile does not exist.", file );
+	FILE* file = fopen( fileName, "rb" );
+	if (!file) FatalError( "LoadSprite( %s ):\nFile does not exist.", file );
 	static struct ChunkHeader { char name[4]; int N; union { int M; char mainName[4]; }; } header;
-	fread( &header, 1, sizeof( ChunkHeader ), f );
+	fread( &header, 1, sizeof( ChunkHeader ), file );
 	if (strncmp( header.name, "VOX ", 4 )) FatalError( "LoadSprite( %s ):\nBad header.", file );
 	if (header.N != 150) FatalError( "LoadSprite( %s ):\nBad version (%i).", file, header.N );
 	if (strncmp( header.mainName, "MAIN", 4 )) FatalError( "LoadSprite( %s ):\nNo MAIN chunk.", file );
-	fread( &header.N, 1, 4, f ); // eat MAIN chunk num bytes of chunk content (N)
-	fread( &header.N, 1, 4, f ); // eat MAIN chunk num bytes of children chunks (M)
+	fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of chunk content (N)
+	fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of children chunks (M)
 	// initialize the palette to the default palette
 	static uint palette[256];
 	static uint default_palette[256] = {
@@ -291,55 +284,56 @@ uint World::LoadSprite( const char* file )
 	while (1)
 	{
 		memset( &header, 0, sizeof( ChunkHeader ) );
-		fread( &header, 1, sizeof( ChunkHeader ), f );
-		if (feof( f ) || header.name[0] == 0) break; // assume end of file
-		else if (!strncmp( header.name, "PACK", 4 )) fread( &frameCount, 1, 4, f );
+		fread( &header, 1, sizeof( ChunkHeader ), file );
+		if (feof( file ) || header.name[0] == 0) break; // assume end of file
+		else if (!strncmp( header.name, "PACK", 4 )) fread( &frameCount, 1, 4, file );
 		else if (!strncmp( header.name, "SIZE", 4 ))
 		{
-			fread( &frame.size, 1, 12, f );
+			fread( &frame.size, 1, 12, file );
 			swap( frame.size.y, frame.size.z ); // sorry Magica, z=up is just wrong
 		}
 		else if (!strncmp( header.name, "XYZI", 4 ))
 		{
-			uint N, p;
+			struct { uchar x, y, z, i; } xyzi;
+			uint N;
 			int3 s = frame.size;
-			fread( &N, 1, 4, f );
+			fread( &N, 1, 4, file );
 			frame.buffer = new unsigned char[s.x * s.y * s.z];
 			memset( frame.buffer, 0, s.x * s.y * s.z );
 			for (uint i = 0; i < N; i++)
 			{
-				fread( &p, 1, 4, f );
-				frame.buffer[(p & 255) + ((p >> 16) & 255) * s.x + ((p >> 8) & 255) * s.x * s.y] = p >> 24;
+				fread( &xyzi, 1, 4, file );
+				frame.buffer[xyzi.x + xyzi.z * s.x + xyzi.y * s.x * s.y] = xyzi.i;
 			}
 			if (newSprite.frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", file );
 			newSprite.frame.push_back( frame );
 		}
 		else if (!strncmp( header.name, "RGBA", 4 ))
 		{
-			fread( palette, 4, 256, f );
+			fread( palette, 4, 256, file );
 		}
 		else if (!strncmp( header.name, "MATT", 4 ))
 		{
 			int dummy[8192]; // we are not supporting materials for now.
-			fread( dummy, 1, header.N, f );
+			fread( dummy, 1, header.N, file );
 		}
 		else break; // FatalError( "LoadSprite( %s ):\nUnknown chunk.", file );
 	}
-	fclose( f );
+	fclose( file );
 	// finalize new sprite
 	int3 maxSize = make_int3( 0 );
 	for (int i = 0; i < frameCount; i++)
 	{
-		SpriteFrame& f = newSprite.frame[i];
-		for (int s = f.size.x * f.size.y * f.size.z, i = 0; i < s; i++) if (f.buffer[i])
+		SpriteFrame& frame = newSprite.frame[i];
+		for (int s = frame.size.x * frame.size.y * frame.size.z, i = 0; i < s; i++) if (frame.buffer[i])
 		{
-			const uint c = palette[f.buffer[i]];
+			const uint c = palette[frame.buffer[i]];
 			const uint blue = ((c >> 16) & 255) >> 6, green = ((c >> 8) & 255) >> 5, red = (c & 255) >> 5;
-			f.buffer[i] = (red << 5) + (green << 2) + blue;
+			frame.buffer[i] = (red << 5) + (green << 2) + blue;
 		}
-		maxSize.x = max( maxSize.x, f.size.x );
-		maxSize.y = max( maxSize.y, f.size.y );
-		maxSize.z = max( maxSize.z, f.size.z );
+		maxSize.x = max( maxSize.x, frame.size.x );
+		maxSize.y = max( maxSize.y, frame.size.y );
+		maxSize.z = max( maxSize.z, frame.size.z );
 	}
 	// create the backup frame for sprite movement
 	SpriteFrame backupFrame;
@@ -378,6 +372,41 @@ uint World::SpriteFrameCount( const uint idx )
 	return (uint)sprite[idx].frame.size();
 }
 
+// World::RemoveSprite (private; called from World::Commit)
+// ----------------------------------------------------------------------------
+void World::RemoveSprite( const uint idx )
+{
+	// restore pixels occupied by sprite at previous location
+	const int3 lastPos = sprite[idx].lastPos;
+	if (lastPos.x == -9999) return;
+	const SpriteFrame& backup = sprite[idx].backup;
+	const int3 s = backup.size;
+	for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
+		Set( lastPos.x + u, lastPos.y + v, lastPos.z + w, backup.buffer[i] );
+}
+
+// World::DrawSprite (private; called from World::Commit)
+// ----------------------------------------------------------------------------
+void World::DrawSprite( const uint idx )
+{
+	// draw sprite at new location
+	const int3& pos = sprite[idx].currPos;
+	if (pos.x != -9999)
+	{
+		const SpriteFrame& frame = sprite[idx].frame[sprite[idx].currFrame];
+		SpriteFrame& backup = sprite[idx].backup;
+		const int3& s = backup.size = frame.size;
+		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
+		{
+			const uint voxel = frame.buffer[i];
+			backup.buffer[i] = Get( pos.x + u, pos.y + v, pos.z + w );
+			if (voxel != 0) Set( pos.x + u, pos.y + v, pos.z + w, voxel );
+		}
+	}
+	// store this location so we can remove the sprite later
+	sprite[idx].lastPos = sprite[idx].currPos;
+}
+
 // World::MoveSpriteTo
 // ----------------------------------------------------------------------------
 void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame )
@@ -385,31 +414,9 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 	// out of bounds checks
 	if (idx >= sprite.size()) return;
 	if (frame >= sprite[idx].frame.size()) return;
-	// restore pixels at previous location
-	const int3 l = sprite[idx].lastPos;
-	if (l.x != -9999)
-	{
-		const SpriteFrame& b = sprite[idx].backup;
-		const int3 s = b.size;
-		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
-		{
-			const uint voxel = b.buffer[i];
-			Set( l.x + u, l.y + v, l.z + w, b.buffer[i] );
-		}
-	}
-	// draw sprite at new location
-	const SpriteFrame& f = sprite[idx].frame[frame];
-	SpriteFrame& b = sprite[idx].backup;
-	const int3& s = f.size;
-	b.size = s;
-	for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
-	{
-		const uint voxel = f.buffer[i];
-		b.buffer[i] = Get( x + u, y + v, z + w );
-		if (voxel != 0) Set( x + u, y + v, z + w, voxel );
-	}
-	// store last location
-	sprite[idx].lastPos = make_int3( x, y, z );
+	// set new sprite location and frame
+	sprite[idx].currPos = make_int3( x, y, z );
+	sprite[idx].currFrame = frame;
 }
 
 /*
@@ -419,10 +426,13 @@ Render flow:
 	 these will now be committed (moved in vram to their final location).
    - The render kernel is invoked. It will run in the background.
 	 The render kernel stores final pixels in an OpenGL texture.
+   - Sprites (if any) are removed from the world, so Game::Tick operates as
+     if their voxels do not exist.
 2. GLFW application loop calls Game::Tick:
    - Game::Tick executes game logic on the CPU.
    - Via the world object, changes are placed in the commit buffer.
 3. GLFW application loop calls World::Commit:
+   - Sprites are added back, to be displayed.
    - The new top-level grid (128^3 uints, 8MB) is copied into the commit buffer.
    - Changed bricks are detected and added to the commit buffer.
    - An asynchronous copy of the commit buffer (host->device) is started.
@@ -467,44 +477,53 @@ void World::Render()
 // ----------------------------------------------------------------------------
 void World::Commit()
 {
-	Timer t;
-	t.reset();
-	uint* idx = commit + gridSize / 4;
-	uchar* dst = (uchar*)(idx + MAXCOMMITS);
+	// add the sprites the world
+	for( uint s = (uint)sprite.size(), i = 0; i < s; i++ ) DrawSprite( i );
+	// make sure the previous commit completed
+	if (commitInFlight) clWaitForEvents( 1, &commitDone );
+	// replace the initial commit buffer by a double-sized buffer in pinned memory
+	static uint* pinnedMemPtr = 0;
+	if (pinnedMemPtr == 0)
+	{
+		const uint pinnedSize = commitSize + gridSize;
+		cl_mem pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 2, 0, 0 );
+		pinnedMemPtr = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, pinnedSize, 0, 0, 0, 0 );
+		StreamCopy( (__m256i*)(pinnedMemPtr + commitSize / 4), (__m256i*)grid, gridSize );
+		grid = pinnedMemPtr + commitSize / 4; // top-level grid resides at the start of the commit buffer
+	}
+	// gather changed bricks
 	tasks = 0;
-	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j )) 
+	uint* brickIndices = pinnedMemPtr + gridSize / 4;
+	uchar* changedBricks = (uchar*)(brickIndices + MAXCOMMITS);
+	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j ) /* if not dirty: skip 32 bits at once */) 
 	{
 		for (uint k = 0; k < 32; k++)
 		{
 			const uint i = j * 32 + k;
 			if (!IsDirty( i )) continue;
-			*idx++ = (uint)i; // store index of modified brick at start of commit buffer
-			StreamCopy( (__m256i*)dst, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
-			dst += BRICKSIZE, tasks++;
+			*brickIndices++ = i; // store index of modified brick at start of commit buffer
+			StreamCopy( (__m256i*)changedBricks, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
+			changedBricks += BRICKSIZE, tasks++;
 		}
 		ClearMarks32( j );
 		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
 	}
+	// copy top-level grid to start of pinned buffer in preparation of final transfer
+	if (tasks > 0 || firstFrame) StreamCopyMT( (__m256i*)pinnedMemPtr, (__m256i*)grid, gridSize );
+	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites
+	for( uint s = (uint)sprite.size(), i = 0; i < s; i++ ) RemoveSprite( i );
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
 	if (tasks > 0 || firstFrame)
 	{
-		static uint* dst = 0;
-		if (dst == 0)
-		{
-			dst = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, commitSize * 2, 0, 0, 0, 0 );
-			StreamCopy( (__m256i*)(dst + commitSize / 4), (__m256i*)commit, commitSize );
-			commit = dst + commitSize / 4, grid = commit; // top-level grid resides at the start of the commit buffer
-		}
-		if (commitInFlight) /* wait for the previous commit to complete */ clWaitForEvents( 1, &commitDone );
-		// copy commit buffer to start of pinned buffer for final DMA transfer
-		StreamCopyMT( (__m256i*)dst, (__m256i*)commit, commitSize );
-		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, commitSize, dst, 0, 0, 0 );
-		// copy the top-level grid to a 3D OpenCL image buffer (vram to vram)
+		// enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
+		const uint copySize = firstFrame ? commitSize: (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE);
+		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
+		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
 		size_t origin[3] = { 0, 0, 0 };
 		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
 		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
-		copyInFlight = true;
-		firstFrame = false;
+		copyInFlight = true;	// next render should wait for this commit to complete
+		firstFrame = false;		// next frame is not the first frame
 	}
 }
 

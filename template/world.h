@@ -21,7 +21,36 @@ public:
 	vector<SpriteFrame> frame;			// sprite frames
 	SpriteFrame backup;					// backup of pixels that the sprite overwrote
 	int3 lastPos = make_int3( -9999 );	// location where the backup will be restored to
+	int3 currPos = make_int3( -9999 );	// location where the sprite will be drawn
+	int currFrame = 0;					// frame to draw
 };
+
+// Sprite system overview:
+// The world contains a set of 0 or more sprites, typically loaded from .vox files.
+// Sprites act like classic homecomputer sprites: they do not affect the world in
+// any way, they just get displayed. Internally, this works as follows:
+// 1. Before Game::Tick is executed:
+//    - the world gets rendered by the GPU
+//    - the sprites are then removed from the world
+// 2. Game::Tick is now executed on a world that does not contain the sprites.
+// 3. After Game::Tick completes:
+//    - each sprite makes a backup of the voxels it overlaps
+//    - the sprites are added back to the world
+//    - the world is synchronized with the GPU for rendering in step 1.
+// Consequence of this system is that even stationary sprites take time to process.
+
+// Voxel world data structure:
+// The world consists of a 128x128x128 top-level grid. Each cell in this grid can
+// either store a solid color, or the index of an 8x8x8 brick. Filling all cells with 
+// brick indices yields the maximum world resolution of 1024x1024x01024.
+// Voxels are 8-bit values. '0' is an empy voxel; all other colors are opaque. Voxel
+// colors are 3-3-2 rgb values. Note that black voxels do not exist in this scheme.
+// The data structure is mirrored to the GPU, with a delay of 1 frame (i.e., the GPU
+// always renders the previous frame). 
+// Furthermore, since the full dataset is a bit over 1GB, only changes are synced.
+// the CPU to GPU communication consists of 8MB for the 128x128x128 top-level ints,
+// plus up to 8192 changed bricks. If more changes are made per frame, these will
+// be postponed to the next frame.
 
 class World
 {
@@ -48,6 +77,10 @@ public:
 	uint CloneSprite( const uint idx );
 	uint SpriteFrameCount( const uint idx );
 	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame = 0 );
+private:
+	void RemoveSprite( const uint idx );
+	void DrawSprite( const uint idx );
+public:
 	// low-level voxel access
 	__forceinline uint Get( const uint x, const uint y, const uint z )
 	{
@@ -115,6 +148,7 @@ public:
 		const uint trashItem = InterlockedAdd( &trashHead, 31 ) - 31;
 		trash[trashItem & (BRICKCOUNT - 1)] = g1;
 	#else
+		// for single-threaded code, a stepsize of 1 maximizes cache coherence.
 		trash[trashHead++ & (BRICKCOUNT - 1)] = g1;
 	#endif
 	}
@@ -162,7 +196,6 @@ public:
 	volatile inline static LONG trashHead = BRICKCOUNT;	// thrash circular buffer tail
 	volatile inline static LONG trashTail = 0;	// thrash circular buffer tail
 	uint* trash = 0;					// indices of recycled bricks
-	uint* commit = 0;					// pointer to CPU-side storage of changes
 	Buffer* screen;						// OpenCL buffer that encapsulates the target OpenGL texture
 	Buffer* prevFrame[2];				// storage for the previous frame, for TAA
 	int prevFrameIdx = 0;				// index of the previous frame buffer that will be used for TAA
@@ -178,7 +211,6 @@ public:
 	uint tasks = 0;						// number of changed bricks, to be passed to commit kernel
 	bool copyInFlight = false;			// flag for skipping async copy on first iteration
 	bool commitInFlight = false;		// flag to make next commit wait for previous to complete
-	cl_mem pinned = 0;					// host-side buffer for fast transfer of commits to GPU
 	cl_mem devmem = 0;					// device-side commit buffer
 	cl_mem gridMap;						// host-side 3D image for top-level
 	Surface* font;						// bitmap font for print command
