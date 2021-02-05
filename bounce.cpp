@@ -43,7 +43,8 @@ void Bouncer::Tick( float deltaTime )
 	// deer
 	for( int i = 0; i < 100; i++ )
 	{
-		world->MoveSpriteTo( i, dx[i], 1, dz[i], df[i] >> 3 );
+		world->MoveSpriteTo( i, dx[i], 1, dz[i] );
+		world->SetSpriteFrame( i, df[i] >> 3 );
 		if (++df[i] == world->SpriteFrameCount( 0 ) * 8) df[i] = 0;
 		if (--dx[i] < 15) dx[i] = 990;
 	}

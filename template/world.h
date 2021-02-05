@@ -73,10 +73,11 @@ public:
 	void Sphere( const float x, const float y, const float z, const float r, const uint c );
 	void HDisc( const float x, const float y, const float z, const float r, const uint c );
 	void Print( const char* text, const uint x, const uint y, const uint z, const uint c );
-	uint LoadSprite( const char* file );
+	uint LoadSprite( const char* voxFile );
 	uint CloneSprite( const uint idx );
 	uint SpriteFrameCount( const uint idx );
-	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame = 0 );
+	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z );
+	void SetSpriteFrame( const uint idx, const uint frame );
 private:
 	void RemoveSprite( const uint idx );
 	void DrawSprite( const uint idx );

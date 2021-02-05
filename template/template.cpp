@@ -31,6 +31,56 @@ extern Game* game;
 
 // world access
 World* GetWorld() { return world; }
+void Sphere( const float x, const float y, const float z, const float r, const uint c )
+{
+	world->Sphere( x, y, z, r, c );
+}
+void Sphere( const float3 pos, const float r, const uint c )
+{
+	world->Sphere( pos.x, pos.y, pos.z, r, c );
+}
+void HDisc( const float x, const float y, const float z, const float r, const uint c )
+{
+	world->HDisc( x, y, z, r, c );
+}
+void HDisc( const float3 pos, const float r, const uint c )
+{
+	world->HDisc( pos.x, pos.y, pos.z, r, c );
+}
+void Print( const char* text, const uint x, const uint y, const uint z, const uint c )
+{
+	world->Print( text, x, y, z, c );
+}	
+void Print( const char* text, const uint3 pos, const uint c )
+{
+	world->Print( text, pos.x, pos.y, pos.z, c );
+}	
+void Print( const char* text, const int3 pos, const uint c )
+{
+	world->Print( text, pos.x, pos.y, pos.z, c );
+}	
+uint LoadSprite( const char* voxFile ) { return world->LoadSprite( voxFile ); }
+uint CloneSprite( const uint idx ) { return world->CloneSprite( idx ); }
+void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z )
+{
+	world->MoveSpriteTo( idx, x, y, z );
+}
+void SetSpriteFrame( const uint idx, const uint frame )
+{
+	world->SetSpriteFrame( idx, frame );
+}
+void MoveSpriteTo( const uint idx, const int3 pos )
+{
+	world->MoveSpriteTo( idx, pos.x, pos.y, pos.z );
+}
+void MoveSpriteTo( const uint idx, const uint3 pos )
+{
+	world->MoveSpriteTo( idx, pos.x, pos.y, pos.z );
+}
+void LookAt( const float3 pos, const float3 target )
+{
+	world->SetCameraMatrix( mat4::LookAt( pos, target ) );
+}
 
 // GLFW callbacks
 void ReshapeWindowCallback( GLFWwindow* window, int w, int h )

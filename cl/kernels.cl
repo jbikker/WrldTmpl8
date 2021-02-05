@@ -155,7 +155,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 		const float3 BRDF1 = INVPI * (float3)((voxel >> 5) * (1.0f / 7.0f), ((voxel >> 2) & 7) * (1.0f / 7.0f), (voxel & 3) * (1.0f / 3.0f));
 	#if 1
 		float3 incoming = (float3)( 0, 0, 0 );
-		uint seed = WangHash( column * 171 + line * 17773 + params->R0 );
+		uint seed = WangHash( column * 171 + line * 1773 + params->R0 );
 		const float4 I = (float4)( params->E + D * dist, 1 );
 		for( int i = 0; i < GIRAYS; i++ )
 		{

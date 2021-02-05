@@ -34,7 +34,7 @@ World::World( const uint targetID )
 	memset( trash, 0, BRICKCOUNT * 4 );
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
 	// prepare a test world
-	grid = new uint[GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH];
+	grid = (uint*)_aligned_malloc( GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 64 );
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
 	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin" );
@@ -243,16 +243,16 @@ void World::Print( const char* text, const uint x, const uint y, const uint z, c
 
 // World::LoadSprite
 // ----------------------------------------------------------------------------
-uint World::LoadSprite( const char* fileName )
+uint World::LoadSprite( const char* voxFile )
 {
 	// attempt to load the .vox file
-	FILE* file = fopen( fileName, "rb" );
-	if (!file) FatalError( "LoadSprite( %s ):\nFile does not exist.", file );
+	FILE* file = fopen( voxFile, "rb" );
+	if (!file) FatalError( "LoadSprite( %s ):\nFile does not exist.", voxFile );
 	static struct ChunkHeader { char name[4]; int N; union { int M; char mainName[4]; }; } header;
 	fread( &header, 1, sizeof( ChunkHeader ), file );
-	if (strncmp( header.name, "VOX ", 4 )) FatalError( "LoadSprite( %s ):\nBad header.", file );
-	if (header.N != 150) FatalError( "LoadSprite( %s ):\nBad version (%i).", file, header.N );
-	if (strncmp( header.mainName, "MAIN", 4 )) FatalError( "LoadSprite( %s ):\nNo MAIN chunk.", file );
+	if (strncmp( header.name, "VOX ", 4 )) FatalError( "LoadSprite( %s ):\nBad header.", voxFile );
+	if (header.N != 150) FatalError( "LoadSprite( %s ):\nBad version (%i).", voxFile, header.N );
+	if (strncmp( header.mainName, "MAIN", 4 )) FatalError( "LoadSprite( %s ):\nNo MAIN chunk.", voxFile );
 	fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of chunk content (N)
 	fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of children chunks (M)
 	// initialize the palette to the default palette
@@ -305,7 +305,7 @@ uint World::LoadSprite( const char* fileName )
 				fread( &xyzi, 1, 4, file );
 				frame.buffer[xyzi.x + xyzi.z * s.x + xyzi.y * s.x * s.y] = xyzi.i;
 			}
-			if (newSprite.frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", file );
+			if (newSprite.frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", voxFile );
 			newSprite.frame.push_back( frame );
 		}
 		else if (!strncmp( header.name, "RGBA", 4 ))
@@ -317,7 +317,7 @@ uint World::LoadSprite( const char* fileName )
 			int dummy[8192]; // we are not supporting materials for now.
 			fread( dummy, 1, header.N, file );
 		}
-		else break; // FatalError( "LoadSprite( %s ):\nUnknown chunk.", file );
+		else break; // FatalError( "LoadSprite( %s ):\nUnknown chunk.", voxFile );
 	}
 	fclose( file );
 	// finalize new sprite
@@ -409,13 +409,18 @@ void World::DrawSprite( const uint idx )
 
 // World::MoveSpriteTo
 // ----------------------------------------------------------------------------
-void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame )
+void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z )
 {
 	// out of bounds checks
 	if (idx >= sprite.size()) return;
-	if (frame >= sprite[idx].frame.size()) return;
 	// set new sprite location and frame
 	sprite[idx].currPos = make_int3( x, y, z );
+}
+
+// World::SetSpriteFrame
+// ----------------------------------------------------------------------------
+void World::SetSpriteFrame( const uint idx, const uint frame )
+{
 	sprite[idx].currFrame = frame;
 }
 
