@@ -122,7 +122,7 @@ float blueNoiseSampler( const __global uint* blueNoise, int x, int y, int sample
 	return retVal;
 }
 
-#define GIRAYS	8
+#define GIRAYS	6
 
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
 	__read_only image3d_t grid, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise )

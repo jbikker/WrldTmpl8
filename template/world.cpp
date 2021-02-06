@@ -195,9 +195,11 @@ Note that these rely on World::Set to actually set/reset voxels.
 // ----------------------------------------------------------------------------
 void World::Sphere( const float x, const float y, const float z, const float r, const uint c )
 {
-	const uint x1 = (uint)max( 0.0f, x - r ), x2 = (uint)min( (float)MAPWIDTH, x + r + 1 );
-	const uint y1 = (uint)max( 0.0f, y - r ), y2 = (uint)min( (float)MAPHEIGHT, y + r + 1 );
-	const uint z1 = (uint)max( 0.0f, z - r ), z2 = (uint)min( (float)MAPDEPTH, z + r + 1 );
+	const uint x1 = (uint)max( 0.f, x - r ), x2 = (uint)min( MAPWIDTH - 1.f, x + r + 1 );
+	const uint y1 = (uint)max( 0.f, y - r ), y2 = (uint)min( MAPHEIGHT - 1.f, y + r + 1 );
+	const uint z1 = (uint)max( 0.f, z - r ), z2 = (uint)min( MAPDEPTH - 1.f, z + r + 1 );
+	if (x1 >= MAPWIDTH || y1 >= MAPHEIGHT || z1 >= MAPDEPTH || 
+		x2 >= MAPWIDTH || y2 >= MAPHEIGHT || z2 >= MAPDEPTH) return;
 	const float r2 = r * r, m2 = (r - 2) * (r - 2);
 	for (uint u = x1; u < x2; u++) for (uint v = y1; v < y2; v++) for (uint w = z1; w < z2; w++)
 	{
@@ -210,8 +212,10 @@ void World::Sphere( const float x, const float y, const float z, const float r, 
 // ----------------------------------------------------------------------------
 void World::HDisc( const float x, const float y, const float z, const float r, const uint c )
 {
-	const uint x1 = (uint)max( 0.0f, x - r ), x2 = (uint)min( (float)MAPWIDTH, x + r + 1 );
-	const uint z1 = (uint)max( 0.0f, z - r ), z2 = (uint)min( (float)MAPDEPTH, z + r + 1 );
+	const uint x1 = (uint)max( 0.f, x - r ), x2 = (uint)min( MAPWIDTH - 1.f, x + r + 1 );
+	const uint z1 = (uint)max( 0.f, z - r ), z2 = (uint)min( MAPDEPTH - 1.f, z + r + 1 );
+	if (x1 >= MAPWIDTH || y >= MAPHEIGHT || z1 >= MAPDEPTH || 
+		x2 >= MAPWIDTH || z2 >= MAPDEPTH) return;
 	const float r2 = r * r;
 	for (uint u = x1; u < x2; u++) for (uint w = z1; w < z2; w++)
 	{

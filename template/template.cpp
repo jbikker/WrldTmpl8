@@ -29,7 +29,7 @@ static int scrwidth = 0, scrheight = 0;
 static World* world = 0;
 extern Game* game;
 
-// world access
+// world access / C API implementation
 World* GetWorld() { return world; }
 void Plot( const uint x, const uint y, const uint z, const uint c )
 {
@@ -93,6 +93,30 @@ void LookAt( const float3 pos, const float3 target )
 {
 	world->SetCameraMatrix( mat4::LookAt( pos, target ) );
 }
+void XLine( const uint x, const uint y, const uint z, int l, const uint c )
+{
+	uint u = x;
+	if (l < 0) l = -l, u -= l;
+	for( int i = 0; i < l; i++ ) world->Set( u + i, y, z, c );
+}
+void XLine( const uint3 pos, int l, const uint c ) { XLine( pos.x, pos.y, pos.z, l, c ); }
+void XLine( const int3 pos, int l, const uint c ) { XLine( pos.x, pos.y, pos.z, l, c ); }
+void YLine( const uint x, const uint y, const uint z, int l, const uint c )
+{
+	uint v = y;
+	if (l < 0) l = -l, v -= l;
+	for( int i = 0; i < l; i++ ) world->Set( x, v + i, z, c );
+}
+void YLine( const uint3 pos, int l, const uint c ) { YLine( pos.x, pos.y, pos.z, l, c ); }
+void YLine( const int3 pos, int l, const uint c ) { YLine( pos.x, pos.y, pos.z, l, c ); }
+void ZLine( const uint x, const uint y, const uint z, int l, const uint c )
+{
+	uint w = z;
+	if (l < 0) l = -l, w -= l;
+	for( int i = 0; i < l; i++ ) world->Set( x, y, w + i, c );
+}
+void ZLine( const uint3 pos, int l, const uint c ) { ZLine( pos.x, pos.y, pos.z, l, c ); }
+void ZLine( const int3 pos, int l, const uint c ) { ZLine( pos.x, pos.y, pos.z, l, c ); }
 
 // GLFW callbacks
 void ReshapeWindowCallback( GLFWwindow* window, int w, int h )
