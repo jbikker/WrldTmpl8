@@ -112,7 +112,7 @@ public:
 private:
 	void RemoveSprite( const uint idx );
 	void DrawSprite( const uint idx );
-	void DrawTileVoxels( const uint cellIdx, const uchar* voxels );
+	void DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes );
 public:
 	// low-level voxel access
 	__forceinline uint Get( const uint x, const uint y, const uint z )
@@ -162,6 +162,9 @@ public:
 		const uint lx = x & (BRICKDIM - 1), ly = y & (BRICKDIM - 1), lz = z & (BRICKDIM - 1);
 		const uint voxelIdx = g1 * BRICKSIZE + lx + ly * BRICKDIM + lz * BRICKDIM * BRICKDIM;
 		const uint cv = brick[voxelIdx];
+		// if (cv != 0 && v == 0) brickInfo[g1].zeroes++;
+		// if (cv == 0 && v != 0) brickInfo[g1].zeroes--;
+		// if (brickInfo[g1].zeroes < BRICKSIZE)
 		if ((brickInfo[g1].zeroes += (cv != 0 && v == 0) - (cv == 0 && v != 0)) < BRICKSIZE)
 		{
 			brick[voxelIdx] = v;
@@ -194,6 +197,7 @@ private:
 		trash[trashHead++ & (BRICKCOUNT - 1)] = idx;
 	#endif
 	}
+	void CheckBrick( const uint idx );
 	void Mark( const uint idx )
 	{
 	#if THREADSAFEWORLD

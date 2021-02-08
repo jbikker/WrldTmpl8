@@ -41,7 +41,7 @@ void Bouncer::Tick( float deltaTime )
 		world->Set( x, 0, z, LIGHTBLUE );
 	}
 	// deer
-	for( int i = 0; i < 100; i++ )
+	for( int i = 0; i < 50; i++ )
 	{
 		world->MoveSpriteTo( i, dx[i], 1, dz[i] );
 		world->SetSpriteFrame( i, df[i] >> 3 );

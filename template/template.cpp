@@ -31,18 +31,12 @@ extern Game* game;
 
 // world access / C API implementation
 World* GetWorld() { return world; }
-void Plot( const uint x, const uint y, const uint z, const uint c )
-{
-	world->Set( x, y, z, c );
-}
-void Plot( const uint3 pos, const uint c )
-{
-	world->Set( pos.x, pos.y, pos.z, c );
-}
-void Plot( const int3 pos, const uint c )
-{
-	world->Set( pos.x, pos.y, pos.z, c );
-}
+void Plot( const uint x, const uint y, const uint z, const uint c ) { world->Set( x, y, z, c ); }
+void Plot( const uint3 pos, const uint c ) { world->Set( pos.x, pos.y, pos.z, c ); }
+void Plot( const int3 pos, const uint c ) { world->Set( pos.x, pos.y, pos.z, c ); }
+uint Read( const int x, const int y, const int z ) { return world->Get( x, y, z ); }
+uint Read( const int3 pos ) { return world->Get( pos.x, pos.y, pos.z ); }
+uint Read( const uint3 pos ) { return world->Get( pos.x, pos.y, pos.z ); }
 void Sphere( const float x, const float y, const float z, const float r, const uint c )
 {
 	world->Sphere( x, y, z, r, c );
@@ -50,6 +44,26 @@ void Sphere( const float x, const float y, const float z, const float r, const u
 void Sphere( const float3 pos, const float r, const uint c )
 {
 	world->Sphere( pos.x, pos.y, pos.z, r, c );
+}
+void Copy( const int3 s1, const int3 s2, const int3 D )
+{
+	const int3 e = s2 - s1;
+	for( int z = 0; z <= e.z; z++ )
+		for( int y = 0; y <= e.y; y++ )
+			for( int x = 0; x <= e.x; x++ )
+				Plot( D + make_int3( x, y, z ), Read( s1 + make_int3( x, y, z ) ) );
+}
+void Copy( const int3 s1, const int3 s2, const int x, const int y, const int z )
+{
+	Copy( s1, s2, make_int3( x, y, z ) );
+}
+void Copy( const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const int3 D )
+{
+	Copy( make_int3( x1, y1, z1 ), make_int3( x2, y2, z2 ), D );
+}
+void Copy( const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint3 D )
+{
+	Copy( make_int3( x1, y1, z1 ), make_int3( x2, y2, z2 ), make_int3( D ) );
 }
 void HDisc( const float x, const float y, const float z, const float r, const uint c )
 {
@@ -73,22 +87,10 @@ void Print( const char* text, const int3 pos, const uint c )
 }	
 uint LoadSprite( const char* voxFile ) { return world->LoadSprite( voxFile ); }
 uint CloneSprite( const uint idx ) { return world->CloneSprite( idx ); }
-void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z )
-{
-	world->MoveSpriteTo( idx, x, y, z );
-}
-void SetSpriteFrame( const uint idx, const uint frame )
-{
-	world->SetSpriteFrame( idx, frame );
-}
-void MoveSpriteTo( const uint idx, const int3 pos )
-{
-	world->MoveSpriteTo( idx, pos.x, pos.y, pos.z );
-}
-void MoveSpriteTo( const uint idx, const uint3 pos )
-{
-	world->MoveSpriteTo( idx, pos.x, pos.y, pos.z );
-}
+void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->MoveSpriteTo( idx, x, y, z ); }
+void SetSpriteFrame( const uint idx, const uint frame ) { world->SetSpriteFrame( idx, frame ); }
+void MoveSpriteTo( const uint idx, const int3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
+void MoveSpriteTo( const uint idx, const uint3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 uint LoadTile( const char* voxFile ) { return world->LoadTile( voxFile ); }
 uint LoadBigTile( const char* voxFile ) { return world->LoadBigTile( voxFile ); }
 void DrawTile( const uint idx, const uint x, const uint y, const uint z ) { world->DrawTile( idx, x, y, z ); }

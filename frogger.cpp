@@ -55,16 +55,18 @@ void Frogger::Tick( float deltaTime )
 {
 	// draw player ship
 	MoveSpriteTo( ship, playerPos );
-	mat4 M = mat4::RotateX( angle ); // * mat4::RotateY( angle * 3 );
+	mat4 M = mat4::RotateX( angle );
 	if ((angle += 0.1f) > 2 * PI) angle -= 2 * PI;
-	if (option1Pos.x != -9999)
+	if (option1Pos.x != -9999) // delete options at old location
 	{
-		Sphere( option1Pos, 4, 0 );
-		Sphere( option2Pos, 4, 0 );
+		Copy( 0, 1000, 0, 10, 1010, 10, make_int3( option1Pos ) - 5 );
+		Copy( 20, 1000, 0, 30, 1010, 10, make_int3( option2Pos ) - 5 );
 	}
 	option1Pos = TransformPosition( make_float3( 0, 16, 0 ), M ) + playerPos;
 	option2Pos = TransformPosition( make_float3( 0, -16, 0 ), M ) + playerPos;
 	optionRadius = 3 + 0.75f * sinf( angle * 2 );
+	Copy( make_int3( option1Pos ) - 5, make_int3( option1Pos ) + 5, 0, 1000, 0 );
+	Copy( make_int3( option2Pos ) - 5, make_int3( option2Pos ) + 5, 20, 1000, 0 );
 	Sphere( option1Pos, optionRadius, LIGHTBLUE );
 	Sphere( option2Pos, optionRadius, LIGHTBLUE );
 	// handle keys

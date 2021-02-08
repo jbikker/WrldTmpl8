@@ -19,7 +19,7 @@
 #define MAPDEPTH	1024	// total world size, z-axis
 #define BRICKDIM	8		// brick dimensions
 #define BDIMLOG2	3		// must be log2(BRICKDIM)
-#define MAXCOMMITS	16384	// maximum number of bricks that can be committed per frame
+#define MAXCOMMITS	8192	// maximum number of bricks that can be committed per frame
 
 // hardware
 // #define CPU_HAS_BMI2		// cpu supports BMI2 instructions; Haswell (2013) / AMD Excavator (2015)

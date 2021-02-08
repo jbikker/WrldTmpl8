@@ -427,6 +427,8 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 // ----------------------------------------------------------------------------
 void World::SetSpriteFrame( const uint idx, const uint frame )
 {
+	if (idx >= sprite.size()) return;
+	if (frame >= sprite[idx]->frame.size()) return;
 	sprite[idx]->currFrame = frame;
 }
 
@@ -444,9 +446,9 @@ void World::DrawTile( const uint idx, const uint x, const uint y, const uint z )
 {
 	if (x >= GRIDWIDTH || y >= GRIDHEIGHT || z > GRIDDEPTH) return;
 	const uint cellIdx = x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
-	DrawTileVoxels( cellIdx, tile[idx]->voxels );
+	DrawTileVoxels( cellIdx, tile[idx]->voxels, tile[idx]->zeroes );
 }
-void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels )
+void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes )
 {
 	const uint g = grid[cellIdx];
 	uint brickIdx;
@@ -454,13 +456,14 @@ void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels )
 	// copy tile data to brick
 	memcpy( brick + brickIdx * BRICKSIZE, voxels, BRICKSIZE );
 	Mark( brickIdx );
+	brickInfo[brickIdx].zeroes = zeroes;
 }
 
 // World::DrawTiles
 // ----------------------------------------------------------------------------
 void World::DrawTiles( const char* tileString, const uint x, const uint y, const uint z )
 {
-	for( uint s = strlen( tileString ), i = 0; i < s; i++ ) 
+	for( uint s = (uint)strlen( tileString ), i = 0; i < s; i++ ) 
 	{
 		const char t = tileString[i];
 		DrawTile( tileString[i] - '0', x + i, y, z );
@@ -481,21 +484,21 @@ void World::DrawBigTile( const uint idx, const uint x, const uint y, const uint 
 {
 	if (x >= GRIDWIDTH / 2 || y >= GRIDHEIGHT / 2 || z > GRIDDEPTH / 2) return;
 	const uint cellIdx = x * 2 + z * 2 * GRIDWIDTH + y * 2 * GRIDWIDTH * GRIDDEPTH;
-	DrawTileVoxels( cellIdx, bigTile[idx]->tile[0].voxels );
-	DrawTileVoxels( cellIdx + 1, bigTile[idx]->tile[1].voxels );
-	DrawTileVoxels( cellIdx + GRIDWIDTH * GRIDDEPTH, bigTile[idx]->tile[2].voxels );
-	DrawTileVoxels( cellIdx + GRIDWIDTH * GRIDDEPTH + 1, bigTile[idx]->tile[3].voxels );
-	DrawTileVoxels( cellIdx + GRIDWIDTH, bigTile[idx]->tile[4].voxels );
-	DrawTileVoxels( cellIdx + GRIDWIDTH + 1, bigTile[idx]->tile[5].voxels );
-	DrawTileVoxels( cellIdx + GRIDWIDTH + GRIDWIDTH * GRIDDEPTH, bigTile[idx]->tile[6].voxels );
-	DrawTileVoxels( cellIdx + GRIDWIDTH + GRIDWIDTH * GRIDDEPTH + 1, bigTile[idx]->tile[7].voxels );
+	DrawTileVoxels( cellIdx, bigTile[idx]->tile[0].voxels, bigTile[idx]->tile[0].zeroes );
+	DrawTileVoxels( cellIdx + 1, bigTile[idx]->tile[1].voxels, bigTile[idx]->tile[1].zeroes );
+	DrawTileVoxels( cellIdx + GRIDWIDTH * GRIDDEPTH, bigTile[idx]->tile[2].voxels, bigTile[idx]->tile[2].zeroes );
+	DrawTileVoxels( cellIdx + GRIDWIDTH * GRIDDEPTH + 1, bigTile[idx]->tile[3].voxels, bigTile[idx]->tile[3].zeroes );
+	DrawTileVoxels( cellIdx + GRIDWIDTH, bigTile[idx]->tile[4].voxels, bigTile[idx]->tile[4].zeroes );
+	DrawTileVoxels( cellIdx + GRIDWIDTH + 1, bigTile[idx]->tile[5].voxels, bigTile[idx]->tile[5].zeroes );
+	DrawTileVoxels( cellIdx + GRIDWIDTH + GRIDWIDTH * GRIDDEPTH, bigTile[idx]->tile[6].voxels, bigTile[idx]->tile[6].zeroes );
+	DrawTileVoxels( cellIdx + GRIDWIDTH + GRIDWIDTH * GRIDDEPTH + 1, bigTile[idx]->tile[7].voxels, bigTile[idx]->tile[7].zeroes );
 }
 
 // World::DrawBigTiles
 // ----------------------------------------------------------------------------
 void World::DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z )
 {
-	for( uint s = strlen( tileString ), i = 0; i < s; i++ )
+	for( uint s = (uint)strlen( tileString ), i = 0; i < s; i++ )
 	{
 		const char t = tileString[i];
 		if (t != ' ') DrawBigTile( tileString[i] - '0', x + i, y, z );
@@ -593,8 +596,6 @@ void World::Commit()
 	}
 	// copy top-level grid to start of pinned buffer in preparation of final transfer
 	if (tasks > 0 || firstFrame) StreamCopyMT( (__m256i*)pinnedMemPtr, (__m256i*)grid, gridSize );
-	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites
-	for (uint s = (uint)sprite.size(), i = 0; i < s; i++) RemoveSprite( i );
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
 	if (tasks > 0 || firstFrame)
 	{
@@ -607,6 +608,24 @@ void World::Commit()
 		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
 		copyInFlight = true;	// next render should wait for this commit to complete
 		firstFrame = false;		// next frame is not the first frame
+	}
+	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites
+	for (uint s = (uint)sprite.size(), i = 0; i < s; i++) RemoveSprite( i );
+}
+
+// World::CheckBrick
+// ----------------------------------------------------------------------------
+void World::CheckBrick( const uint idx )
+{
+	int zeroCount = 0;
+	for( int q = 0; q < BRICKSIZE; q++ ) if (brick[idx * BRICKSIZE + q] == 0) zeroCount++;
+	if (zeroCount != brickInfo[idx].zeroes)
+	{
+		for( int i = 0; i < GRIDSIZE; i++ ) if (grid[i] == ((idx << 1)|1))
+		{
+			int w = 0;
+			FatalError( "Bad brick!" );
+		}
 	}
 }
 
