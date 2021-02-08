@@ -137,7 +137,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	// trace primary ray
 	float dist;
 	float3 N;
-	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick, 256 );
+	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick, GRIDWIDTH * 2 );
 
 	// visualize result
 	float3 pixel;
@@ -164,7 +164,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 			const float4 R = (float4)( DiffuseReflectionCosWeighted( r0, r1, N ), 1 );
 			float3 N2;
 			float dist2;
-			const uint voxel2 = TraceRay( I + 0.1f * (float4)( N, 1 ), R, &dist2, &N2, grid, brick, 10 );
+			const uint voxel2 = TraceRay( I + 0.1f * (float4)( N, 1 ), R, &dist2, &N2, grid, brick, GRIDWIDTH / 12 );
 			if (voxel2 == 0)
 			{
 				// sky

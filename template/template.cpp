@@ -89,6 +89,20 @@ void MoveSpriteTo( const uint idx, const uint3 pos )
 {
 	world->MoveSpriteTo( idx, pos.x, pos.y, pos.z );
 }
+uint LoadTile( const char* voxFile ) { return world->LoadTile( voxFile ); }
+uint LoadBigTile( const char* voxFile ) { return world->LoadBigTile( voxFile ); }
+void DrawTile( const uint idx, const uint x, const uint y, const uint z ) { world->DrawTile( idx, x, y, z ); }
+void DrawTile( const uint idx, const int3 pos ) { world->DrawTile( idx, pos.x, pos.y, pos.z ); }
+void DrawTile( const uint idx, const uint3 pos ) { world->DrawTile( idx, pos.x, pos.y, pos.z ); }
+void DrawTiles( const char* tileString, const uint x, const uint y, const uint z ) { world->DrawTiles( tileString, x, y, z ); }
+void DrawTiles( const char* tileString, const int3 pos ) { world->DrawTiles( tileString, pos.x, pos.y, pos.z ); }
+void DrawTiles( const char* tileString, const uint3 pos ) { world->DrawTiles( tileString, pos.x, pos.y, pos.z ); }
+void DrawBigTile( const uint idx, const uint x, const uint y, const uint z ) { world->DrawBigTile( idx, x, y, z ); }
+void DrawBigTile( const uint idx, const int3 pos ) { world->DrawBigTile( idx, pos.x, pos.y, pos.z ); }
+void DrawBigTile( const uint idx, const uint3 pos ) { world->DrawBigTile( idx, pos.x, pos.y, pos.z ); }
+void DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z ) { world->DrawBigTiles( tileString, x, y, z ); }
+void DrawBigTiles( const char* tileString, const int3 pos ) { world->DrawBigTiles( tileString, pos.x, pos.y, pos.z ); }
+void DrawBigTiles( const char* tileString, const uint3 pos ) { world->DrawBigTiles( tileString, pos.x, pos.y, pos.z ); }
 void LookAt( const float3 pos, const float3 target )
 {
 	world->SetCameraMatrix( mat4::LookAt( pos, target ) );

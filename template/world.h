@@ -8,23 +8,6 @@ namespace Tmpl8
 
 struct BrickInfo { uint zeroes; /* , location; */ };
 
-class SpriteFrame
-{
-public:
-	uchar* buffer;
-	int3 size;							// size of the sprite over x, y and z
-};
-
-class Sprite
-{
-public:
-	vector<SpriteFrame> frame;			// sprite frames
-	SpriteFrame backup;					// backup of pixels that the sprite overwrote
-	int3 lastPos = make_int3( -9999 );	// location where the backup will be restored to
-	int3 currPos = make_int3( -9999 );	// location where the sprite will be drawn
-	int currFrame = 0;					// frame to draw
-};
-
 // Sprite system overview:
 // The world contains a set of 0 or more sprites, typically loaded from .vox files.
 // Sprites act like classic homecomputer sprites: they do not affect the world in
@@ -38,6 +21,48 @@ public:
 //    - the sprites are added back to the world
 //    - the world is synchronized with the GPU for rendering in step 1.
 // Consequence of this system is that even stationary sprites take time to process.
+
+class SpriteFrame
+{
+public:
+	~SpriteFrame() { delete buffer; }
+	uchar* buffer = 0;
+	int3 size = make_int3( 0 );			// size of the sprite over x, y and z
+};
+
+class Sprite
+{
+public:
+	vector<SpriteFrame*> frame;			// sprite frames
+	SpriteFrame* backup;				// backup of pixels that the sprite overwrote
+	int3 lastPos = make_int3( -9999 );	// location where the backup will be restored to
+	int3 currPos = make_int3( -9999 );	// location where the sprite will be drawn
+	int currFrame = 0;					// frame to draw
+};
+
+// Tile system overview:
+// The top-level grid / brick layout of the world (see below) fits well with the 
+// classic concept of tiled graphics. A tile is simply an 8x8x8 or 16x16x16 chunk of 
+// voxel data, which can be placed in the world at locations that are a multiple of 8 
+// over x, y and z. Drawing a tile will thus simply overwrite the contents of a brick 
+// (or 8 bricks, when using the larger 16x16x16 tiles).
+
+class Tile
+{
+public:
+	Tile() = default;
+	Tile( const char* voxFile );
+	uchar voxels[BRICKSIZE];			// tile voxel data
+	uint zeroes;						// number of transparent voxels in the tile
+};
+
+class BigTile
+{
+public:
+	BigTile() = default;
+	BigTile( const char* voxFile );
+	Tile tile[8];						// a big tile is just 2x2x2 tiles stored together
+};
 
 // Voxel world data structure:
 // The world consists of a 128x128x128 top-level grid. Each cell in this grid can
@@ -78,9 +103,16 @@ public:
 	uint SpriteFrameCount( const uint idx );
 	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z );
 	void SetSpriteFrame( const uint idx, const uint frame );
+	uint LoadTile( const char* voxFile );
+	uint LoadBigTile( const char* voxFile );
+	void DrawTile( const uint idx, const uint x, const uint y, const uint z );
+	void DrawTiles( const char* tileString, const uint x, const uint y, const uint z );
+	void DrawBigTile( const uint idx, const uint x, const uint y, const uint z );
+	void DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z );
 private:
 	void RemoveSprite( const uint idx );
 	void DrawSprite( const uint idx );
+	void DrawTileVoxels( const uint cellIdx, const uchar* voxels );
 public:
 	// low-level voxel access
 	__forceinline uint Get( const uint x, const uint y, const uint z )
@@ -108,14 +140,7 @@ public:
 		if ((g & 1) == 0 /* this is currently a 'solid' grid cell */)
 		{
 			if (g1 == v) return; // about to set the same value; we're done here
-		#if THREADSAFEWORLD
-			// get a fresh brick from the circular list in a thread-safe manner and without false sharing
-			const uint trashItem = InterlockedAdd( &trashTail, 31 ) - 31;
-			const uint newIdx = trash[trashItem & (BRICKCOUNT - 1)];
-		#else
-			// slightly faster to not prevent false sharing if we're doing single core updates only
-			const uint newIdx = trash[trashTail++ & (BRICKCOUNT - 1)];
-		#endif
+			const uint newIdx = NewBrick();
 		#if BRICKDIM == 8
 			// fully unrolled loop for writing the 512 bytes needed for a single brick, faster than memset
 			const __m256i zero8 = _mm256_set1_epi8( static_cast<char>(g1) );
@@ -144,13 +169,29 @@ public:
 			return;
 		}
 		grid[cellIdx] = 0; // brick just became completely zeroed; recycle
+		FreeBrick( g1 );
+	}
+private:
+	uint NewBrick()
+	{
 	#if THREADSAFEWORLD
+		// get a fresh brick from the circular list in a thread-safe manner and without false sharing
+		const uint trashItem = InterlockedAdd( &trashTail, 31 ) - 31;
+		return trash[trashItem & (BRICKCOUNT - 1)];
+	#else
+		// slightly faster to not prevent false sharing if we're doing single core updates only
+		return trash[trashTail++ & (BRICKCOUNT - 1)];
+	#endif
+	}
+	void FreeBrick( const uint idx )
+	{
+		#if THREADSAFEWORLD
 		// thread-safe access of the circular list
 		const uint trashItem = InterlockedAdd( &trashHead, 31 ) - 31;
-		trash[trashItem & (BRICKCOUNT - 1)] = g1;
+		trash[trashItem & (BRICKCOUNT - 1)] = idx;
 	#else
 		// for single-threaded code, a stepsize of 1 maximizes cache coherence.
-		trash[trashHead++ & (BRICKCOUNT - 1)] = g1;
+		trash[trashHead++ & (BRICKCOUNT - 1)] = idx;
 	#endif
 	}
 	void Mark( const uint idx )
@@ -216,7 +257,10 @@ public:
 	cl_mem gridMap;						// host-side 3D image for top-level
 	Surface* font;						// bitmap font for print command
 	bool firstFrame = true;				// for doing things in the first frame
-	vector<Sprite> sprite;				// list of loaded sprites
+public: // TODO: protected
+	vector<Sprite*> sprite;				// list of loaded sprites
+	vector<Tile*> tile;					// list of loaded tiles
+	vector<BigTile*> bigTile;			// list of loaded big tiles
 };
 
 } // namespace Tmpl8

@@ -22,7 +22,30 @@ void Frogger::Init()
 	// load a spaceship
 	ship = LoadSprite( "assets/ship.vox" );
 	// init bullets
-	for( int i = 0; i < 128; i++ ) bulletPos[i].x = oldBulletPos[i].x = -9999;
+	for (int i = 0; i < 128; i++) bulletPos[i].x = oldBulletPos[i].x = -9999;
+	// load tiles
+	uint tile[12] = {
+		LoadBigTile( "assets/tile00.vox" ), // white sphere
+		LoadBigTile( "assets/tile01.vox" ), // small horizontal platform tile
+		LoadBigTile( "assets/tile02.vox" ), // cylinder bottom left
+		LoadBigTile( "assets/tile03.vox" ), // cylinder bottom right
+		LoadBigTile( "assets/tile04.vox" ), // cylinder top right
+		LoadBigTile( "assets/tile05.vox" ), // cylinder top left
+		LoadBigTile( "assets/tile06.vox" ), // pillar bottom left
+		LoadBigTile( "assets/tile07.vox" ), // pillar bottom right
+		LoadBigTile( "assets/tile08.vox" ), // pillar top right
+		LoadBigTile( "assets/tile09.vox" ), // pillar top left
+		LoadBigTile( "assets/tile10.vox" ), // double horizontal platform, left
+		LoadBigTile( "assets/tile11.vox" )  // double horizontal platform, right
+	};
+	for( int z = 28; z < 33; z++ ) DrawBigTiles( "1111111111111111111111111111111111111111", 4, 4, z );
+	for( int y = 1; y < 10; y++ ) 
+	{
+		DrawBigTiles( "67   67   67   67   67   67   67", 10, y, 38 );
+		DrawBigTiles( "98   98   98   98   98   98   98", 10, y, 39 );
+		DrawBigTiles( "67   67   67   67   67   67", 10, y, 18 );
+		DrawBigTiles( "98   98   98   98   98   98", 10, y, 19 );
+	}
 }
 
 // -----------------------------------------------------------
@@ -53,7 +76,7 @@ void Frogger::Tick( float deltaTime )
 	float3 camPos = make_float3( (playerPos.x + 512) * 0.5f, 128.1f, (playerPos.x - 192) * 0.5f );
 	LookAt( camPos, make_float3( playerPos ) );
 	// span bullets
-	if (GetAsyncKeyState( 32 )) if (!gunDelay) 
+	if (GetAsyncKeyState( 32 )) if (!gunDelay)
 	{
 		int3 gunPos;
 		if (gun == 0) gunPos = make_int3( playerPos.x + 10, playerPos.y + 1, playerPos.z + 3 );
@@ -64,9 +87,9 @@ void Frogger::Tick( float deltaTime )
 		gunDelay = 6, gun = (gun + 1) & 3;
 	}
 	// remove bullets at previous positions
-	for( int i = 0; i < 128; i++ ) if (oldBulletPos[i].x != -9999) XLine( oldBulletPos[i], 24, 0 );
+	for (int i = 0; i < 128; i++) if (oldBulletPos[i].x != -9999) XLine( oldBulletPos[i], 24, 0 );
 	// draw active bullets
-	for( int i = 0; i < 128; i++ ) if (bulletPos[i].x != -9999)
+	for (int i = 0; i < 128; i++) if (bulletPos[i].x != -9999)
 	{
 		XLine( bulletPos[i], 24, YELLOW );
 		oldBulletPos[i] = bulletPos[i];
