@@ -31,6 +31,10 @@ extern Game* game;
 
 // world access / C API implementation
 World* GetWorld() { return world; }
+void ClearWorld() { world->Clear(); }
+void WorldXScroll( const int offset ) { world->ScrollX( offset ); }
+void WorldYScroll( const int offset ) { world->ScrollY( offset ); }
+void WorldZScroll( const int offset ) { world->ScrollZ( offset ); }
 void Plot( const uint x, const uint y, const uint z, const uint c ) { world->Set( x, y, z, c ); }
 void Plot( const uint3 pos, const uint c ) { world->Set( pos.x, pos.y, pos.z, c ); }
 void Plot( const int3 pos, const uint c ) { world->Set( pos.x, pos.y, pos.z, c ); }

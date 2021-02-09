@@ -109,7 +109,12 @@ public:
 	void DrawTiles( const char* tileString, const uint x, const uint y, const uint z );
 	void DrawBigTile( const uint idx, const uint x, const uint y, const uint z );
 	void DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z );
+	// block scrolling
+	void ScrollX( const int offset );
+	void ScrollY( const int offset );
+	void ScrollZ( const int offset );
 private:
+	// internal methods
 	void RemoveSprite( const uint idx );
 	void DrawSprite( const uint idx );
 	void DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes );
@@ -162,16 +167,14 @@ public:
 		const uint lx = x & (BRICKDIM - 1), ly = y & (BRICKDIM - 1), lz = z & (BRICKDIM - 1);
 		const uint voxelIdx = g1 * BRICKSIZE + lx + ly * BRICKDIM + lz * BRICKDIM * BRICKDIM;
 		const uint cv = brick[voxelIdx];
-		// if (cv != 0 && v == 0) brickInfo[g1].zeroes++;
-		// if (cv == 0 && v != 0) brickInfo[g1].zeroes--;
-		// if (brickInfo[g1].zeroes < BRICKSIZE)
 		if ((brickInfo[g1].zeroes += (cv != 0 && v == 0) - (cv == 0 && v != 0)) < BRICKSIZE)
 		{
 			brick[voxelIdx] = v;
 			Mark( g1 ); // tag to be synced with GPU
 			return;
 		}
-		grid[cellIdx] = 0; // brick just became completely zeroed; recycle
+		grid[cellIdx] = 0;	// brick just became completely zeroed; recycle
+		UnMark( g1 );		// no need to send it to GPU anymore
 		FreeBrick( g1 );
 	}
 private:
@@ -205,6 +208,15 @@ private:
 		_interlockedbittestandset( (LONG*)modified + (idx >> 5), idx & 31 );
 	#else
 		modified[idx >> 5] |= 1 << (idx & 31);
+	#endif
+	}
+	void UnMark( const uint idx )
+	{
+	#if THREADSAFEWORLD
+		// be careful, resetting a bit in an array is not thread-safe without _interlockedbittestandreset
+		_interlockedbittestandreset( (LONG*)modified + (idx >> 5), idx & 31 );
+	#else
+		modified[idx >> 5] &= 0xffffffffu - (1 << (idx & 31));
 	#endif
 	}
 	bool IsDirty( const uint idx ) { return (modified[idx >> 5] & (1 << (idx & 31))) > 0; }

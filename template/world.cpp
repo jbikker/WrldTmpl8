@@ -106,6 +106,13 @@ void World::DummyWorld()
 // ----------------------------------------------------------------------------
 void World::Clear()
 {
+#if 1
+	// easiest top just clear the top-level grid and recycle all bricks
+	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
+	memset( trash, 0, BRICKCOUNT * 4 );
+	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
+	ClearMarks();
+#else
 	for (int z = 0; z < GRIDDEPTH; z++) for (int y = 0; y < GRIDHEIGHT; y++) for (int x = 0; x < GRIDWIDTH; x++)
 	{
 		const uint cellIdx = x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
@@ -121,6 +128,48 @@ void World::Clear()
 		}
 	}
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
+#endif
+}
+
+// World::ScrollX
+// ----------------------------------------------------------------------------
+void World::ScrollX( const int offset )
+{
+	if (offset % BRICKDIM != 0) FatalError( "ScollX( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
+	const int o = abs( offset / BRICKDIM );
+	for( uint z = 0; z < GRIDDEPTH; z++ ) for( uint y = 0; y < GRIDHEIGHT; y++ )
+	{
+		uint* line = grid + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
+		uint backup[GRIDWIDTH];
+		if (offset < 0)
+		{
+			for( int x = 0; x < o; x++ ) backup[x] = line[x];
+			for( int x = o; x < GRIDWIDTH; x++ ) line[x - o] = line[x];
+			for( int x = 0; x < o; x++ ) line[GRIDWIDTH - 1 - o + x] = backup[x];
+		}
+		else
+		{
+			for( int x = 0; x < o; x++ ) backup[x] = line[GRIDWIDTH - 1 - o + x];
+			for( int x = GRIDWIDTH - 1; x >= o; x-- ) line[x] = line[x - o];
+			for( int x = 0; x < o; x++ ) line[x] = backup[x];
+		}
+	}
+}
+
+// World::ScrollX
+// ----------------------------------------------------------------------------
+void World::ScrollY( const int offset )
+{
+	if (offset % BRICKDIM != 0) FatalError( "ScollY( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
+	// TODO
+}
+
+// World::ScrollX
+// ----------------------------------------------------------------------------
+void World::ScrollZ( const int offset )
+{
+	if (offset % BRICKDIM != 0) FatalError( "ScollZ( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
+	// TODO
 }
 
 // World::LoadSky

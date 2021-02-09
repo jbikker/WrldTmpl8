@@ -20,6 +20,14 @@ public:
 	int2 mousePos;
 	float3 ballPos = make_float3( 300, 100, 300 );
 	float3 ballVel = make_float3( 0.3f, 0, 0.5f );
+private:
+	int shipSprite;
+	int3 playerPos = make_int3( 512, 128, 512 );
+	int3 bulletPos[128], oldBulletPos[128];
+	int gunDelay = 0, gun = 0, bulletPtr = 0;
+	float3 option1Pos = make_float3( -9999 ), option2Pos;
+	float optionAngle = 0, optionRadius;
+	int scroll = 0;
 };
 
 } // namespace Tmpl8

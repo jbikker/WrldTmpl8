@@ -1161,6 +1161,10 @@ void MortonToXYZ( const uint m, uint& x, uint& y, uint& z )
 // voxel world engine
 #include "world.h"
 World* GetWorld();
+void ClearWorld();
+void WorldXScroll( const int offset );
+void WorldYScroll( const int offset );
+void WorldZScroll( const int offset );
 void Plot( const uint x, const uint y, const uint z, const uint c );
 void Plot( const uint3 pos, const uint c );
 void Plot( const int3 pos, const uint c );
