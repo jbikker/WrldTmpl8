@@ -22,7 +22,10 @@
 #define MAXCOMMITS	8192	// maximum number of bricks that can be committed per frame
 
 // renderer performance setting: set to 0 for slower devices, up to 8 for fast GPUs
-#define GIRAYS		4
+#define GIRAYS		16
+
+// Panini projection, http://tksharpless.net/vedutismo/Pannini/panini.pdf via https://www.shadertoy.com/view/Wt3fzB
+#define PANINI		1
 
 // hardware
 // #define CPU_HAS_BMI2		// cpu supports BMI2 instructions; Haswell (2013) / AMD Excavator (2015)

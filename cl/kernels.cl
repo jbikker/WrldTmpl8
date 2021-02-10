@@ -122,6 +122,28 @@ float blueNoiseSampler( const __global uint* blueNoise, int x, int y, int sample
 	return retVal;
 }
 
+// tc ∈ [-1,1]² | fov ∈ [0, π) | d ∈ [0,1] -  via https://www.shadertoy.com/view/tt3BRS
+float3 PaniniProjection( float2 tc, const float fov, const float d )
+{
+	const float d2 = d * d;
+	{
+		const float fo = PI * 0.5f - fov * 0.5f;
+		const float f = cos( fo ) / sin( fo ) * 2.0f;
+		const float f2 = f * f;
+		const float b = (native_sqrt( max( 0.f, (d + d2) * (d + d2) * (f2 + f2 * f2) ) ) - (d * f + f)) / (d2 + d2 * f2 - 1);
+		tc *= b;
+	}
+	const float h = tc.x, v = tc.y, h2 = h * h;
+	const float k = h2 / ((d + 1) * (d + 1)), k2 = k * k;
+	const float discr = max( 0.f, k2 * d2 - (k + 1) * (k * d2 - 1) );
+	const float cosPhi = (-k * d + native_sqrt( discr )) / (k + 1.f);
+	const float S = (d + 1) / (d + cosPhi), tanTheta = v / S;
+	float sinPhi = native_sqrt( max( 0.f, 1 - cosPhi * cosPhi ) );
+	if (tc.x < 0.0) sinPhi *= -1;
+	const float s = native_rsqrt( 1 + tanTheta * tanTheta );
+	return (float3)( sinPhi, tanTheta, cosPhi ) * s;
+}
+
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
 	__read_only image3d_t grid, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise )
 {
@@ -129,8 +151,16 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	const int column = get_global_id( 0 );
 	const int line = get_global_id( 1 );
 	const float2 uv = (float2)((float)column * params->oneOverRes.x, (float)line * params->oneOverRes.y);
+#if PANINI
+	const float3 V = PaniniProjection( (float2)( uv.x * 2 - 1, uv.y * ((float)SCRHEIGHT / SCRWIDTH) * 2 - 1 ), PI / 5, 0.1f );
+	// multiply by improvised camera matrix
+	const float3 D = V.z * normalize( (params->p1 + params->p2) * 0.5f - params->E ) +
+					 V.x * normalize( params->p1 - params->p0 ) +
+					 V.y * normalize( params->p2 - params->p0 );
+#else
 	const float3 P = params->p0 + (params->p1 - params->p0) * uv.x + (params->p2 - params->p0) * uv.y;
 	const float3 D = normalize( P - params->E );
+#endif
 
 	// trace primary ray
 	float dist;
@@ -234,4 +264,4 @@ __kernel void commit( const int taskCount, __global uint* commit, __global uint*
 // Faster empty space skipping:
 // bits for empty top-level grid cells didn't work.
 // Try instead: https://www.kalojanov.com/data/irregular_grid.pdf
-// as suggested by Guillaume Boiss�.
+// as suggested by Guillaume Boissé.
