@@ -122,8 +122,6 @@ float blueNoiseSampler( const __global uint* blueNoise, int x, int y, int sample
 	return retVal;
 }
 
-#define GIRAYS	6
-
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
 	__read_only image3d_t grid, __global unsigned char* brick, __global float4* sky, __global const uint* blueNoise )
 {
@@ -153,7 +151,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	else
 	{
 		const float3 BRDF1 = INVPI * (float3)((voxel >> 5) * (1.0f / 7.0f), ((voxel >> 2) & 7) * (1.0f / 7.0f), (voxel & 3) * (1.0f / 3.0f));
-	#if 1
+	#if GIRAYS > 0
 		float3 incoming = (float3)( 0, 0, 0 );
 		uint seed = WangHash( column * 171 + line * 1773 + params->R0 );
 		const float4 I = (float4)( params->E + D * dist, 1 );
@@ -178,40 +176,21 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 			{
 				float3 BRDF2 = INVPI * (float3)((voxel2 >> 5) * (1.0f / 7.0f), ((voxel2 >> 2) & 7) * (1.0f / 7.0f), (voxel2 & 3) * (1.0f / 3.0f));
 				// secondary hit
-			#if 1
 				incoming += BRDF2 * 2 * (
 					(N2.x * N2.x) * ((-N2.x + 1) * (float3)(NX0) + (N2.x + 1) * (float3)(NX1)) +
 					(N2.y * N2.y) * ((-N2.y + 1) * (float3)(NY0) + (N2.y + 1) * (float3)(NY1)) +
 					(N2.z * N2.z) * ((-N2.z + 1) * (float3)(NZ0) + (N2.z + 1) * (float3)(NZ1))
 				);
-			#else
-				if (N2.x == -1) incoming += BRDF2 * (float3)(NX0) * 4;
-				if (N2.x ==  1) incoming += BRDF2 * (float3)(NX1) * 4;
-				if (N2.y == -1) incoming += BRDF2 * (float3)(NY0) * 4;
-				if (N2.y ==  1) incoming += BRDF2 * (float3)(NY1) * 4;
-				if (N2.z == -1) incoming += BRDF2 * (float3)(NZ0) * 4;
-				if (N2.z ==  1) incoming += BRDF2 * (float3)(NZ1) * 4;
-			#endif
 			}
 		}
 		pixel = BRDF1 * incoming * (1.0f / GIRAYS);
 	#else
 		// hardcoded lights - image based lighting, no visibility test
-	#if 1
 		pixel = BRDF1 * 2 * (
 			(N.x * N.x) * ((-N.x + 1) * (float3)(NX0) + (N.x + 1) * (float3)(NX1)) +
 			(N.y * N.y) * ((-N.y + 1) * (float3)(NY0) + (N.y + 1) * (float3)(NY1)) +
 			(N.z * N.z) * ((-N.z + 1) * (float3)(NZ0) + (N.z + 1) * (float3)(NZ1))
 		);
-	#else
-		if (N.x == -1) pixel = (float3)(NX0) * 4;
-		if (N.x ==  1) pixel = (float3)(NX1) * 4;
-		if (N.y == -1) pixel = (float3)(NY0) * 4;
-		if (N.y ==  1) pixel = (float3)(NY1) * 4;
-		if (N.z == -1) pixel = (float3)(NZ0) * 4;
-		if (N.z ==  1) pixel = (float3)(NZ1) * 4;
-		pixel *= BRDF1;
-	#endif
 	#endif
 	}
 	write_imagef( outimg, (int2)(column, line), (float4)( pixel, 1 ) );
