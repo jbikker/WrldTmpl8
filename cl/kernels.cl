@@ -152,7 +152,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	const int line = get_global_id( 1 );
 	const float2 uv = (float2)((float)column * params->oneOverRes.x, (float)line * params->oneOverRes.y);
 #if PANINI
-	const float3 V = PaniniProjection( (float2)( uv.x * 2 - 1, uv.y * ((float)SCRHEIGHT / SCRWIDTH) * 2 - 1 ), PI / 5, 0.1f );
+	const float3 V = PaniniProjection( (float2)( uv.x * 2 - 1, (uv.y * 2 - 1) * ((float)SCRHEIGHT / SCRWIDTH) ), PI / 5, 0.15f );
 	// multiply by improvised camera matrix
 	const float3 D = V.z * normalize( (params->p1 + params->p2) * 0.5f - params->E ) +
 					 V.x * normalize( params->p1 - params->p0 ) +
