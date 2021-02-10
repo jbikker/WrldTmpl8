@@ -19,9 +19,9 @@ you wish, once you are ready to do so.
 
 This code is completely free to use and distribute in any form.
 
-Utrecht, 2015-2021, Utrecht University
-Breda, 2014 and 2020-2021, NHTV/IGAD/BUAS
-Jacco Bikker
+Utrecht, 2015-2021, Utrecht University<br/>
+Breda, 2014 and 2020-2021, NHTV/IGAD/BUAS</br/>
+Jacco Bikker<br/>
 Report problems and suggestions to bikker.j@gmail.com.
 
 *Changelog*
