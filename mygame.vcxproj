@@ -139,6 +139,7 @@
     <ClInclude Include="template\common.h" />
     <ClInclude Include="template\precomp.h" />
     <ClInclude Include="template\world.h" />
+    <ClInclude Include="template\worldapi.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="cl\kernels.cl" />
