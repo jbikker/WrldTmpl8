@@ -13,7 +13,7 @@ void Bouncer::Init()
 	for (int x = 256; x < 768; x++) for (int z = 256; z < 768; z++) GetWorld()->Set( x, 255, z, 0 );
 	// init deer flock
 	GetWorld()->LoadSprite( "assets/deer.vox" );
-	for( int i = 0; i < 50; i++ ) 
+	for (int i = 0; i < 50; i++)
 	{
 		GetWorld()->CloneSprite( 0 );
 		dx[i] = RandomUInt() % 1000 + 1, dz[i] = i * 20 + 10;
@@ -30,18 +30,18 @@ void Bouncer::Tick( float deltaTime )
 	world->SetCameraMatrix( mat4::LookAt( make_float3( 512, 128, 512 ), make_float3( ballPos.x, 64, ballPos.z ) ) );
 	// add a landscape; TODO: to make this happen in Init, we should send a full copy of the world after init.
 	static int z = 0;
-	if (++z < 1023) for( int x = 1; x < 1023; x++ )
+	if (++z < 1023) for (int x = 1; x < 1023; x++)
 	{
 		const float f = noise2D( x * 0.5f, z * 0.5f ); // base layer
 		const float r = noise2D( x * 15.0f + 5000, z * 15.0f ); // rocks
 		int h1 = (int)(f * 512) - 16, h2 = h1 + (int)(r * 64) - 5;
 		uint grassColor = (((h1 + h2) & 63) / 30 + 3) << 2, sandColor = 180 + ((h2 & 1) << 2);
-		for( int y = 1; y < h1; y++ ) world->Set( x, y, z, h1 < 5 ? sandColor : grassColor );
-		for( int y = max( 1, h1 ); y < h2; y++ ) world->Set( x, y, z, GREY );
+		for (int y = 1; y < h1; y++) world->Set( x, y, z, h1 < 5 ? sandColor : grassColor );
+		for (int y = max( 1, h1 ); y < h2; y++) world->Set( x, y, z, GREY );
 		world->Set( x, 0, z, LIGHTBLUE );
 	}
 	// deer
-	for( int i = 0; i < 50; i++ )
+	for (int i = 0; i < 50; i++)
 	{
 		world->MoveSpriteTo( i, dx[i], 1, dz[i] );
 		world->SetSpriteFrame( i, df[i] >> 3 );

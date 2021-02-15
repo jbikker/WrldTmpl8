@@ -22,7 +22,7 @@
 #define MAXCOMMITS	8192	// maximum number of bricks that can be committed per frame
 
 // renderer performance setting: set to 0 for slower devices, up to 8 for fast GPUs
-#define GIRAYS		16
+#define GIRAYS		4
 
 // Panini projection, http://tksharpless.net/vedutismo/Pannini/panini.pdf via https://www.shadertoy.com/view/Wt3fzB
 #define PANINI		1

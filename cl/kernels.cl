@@ -26,10 +26,22 @@ float4 FixZeroDeltas( float4 V )
 }
 
 // mighty two-level grid traversal
-uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, __global const unsigned char* brick, int steps )
+uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, __global const unsigned char* brick, int steps )
 {
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
-	uint4 pos = (uint4)(clamp( (int)A.x, 0, MAPWIDTH - 1 ), clamp( (int)A.y, 0, MAPHEIGHT - 1 ), clamp( (int)A.z, 0, MAPDEPTH - 1 ), 0);
+	const bool originOutsideGrid = A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH;
+	if (steps == 999999 && originOutsideGrid)
+	{
+		// use slab test to clip ray origin against scene AABB
+		const float tx1 = -A.x * rV.x, tx2 = (MAPWIDTH - A.x) * rV.x;
+		float tmin = min( tx1, tx2 ), tmax = max( tx1, tx2 );
+		const float ty1 = -A.y * rV.y, ty2 = (MAPHEIGHT - A.y) * rV.y;
+		tmin = max( tmin, min( ty1, ty2 ) ), tmax = min( tmax, max( ty1, ty2 ) );
+		const float tz1 = -A.z * rV.z, tz2 = (MAPDEPTH - A.z) * rV.z;
+		tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
+		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
+	}
+	const uint4 pos = (uint4)(clamp( (int)A.x, 0, MAPWIDTH - 1 ), clamp( (int)A.y, 0, MAPHEIGHT - 1 ), clamp( (int)A.z, 0, MAPDEPTH - 1 ), 0);
 	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
 	float tmx = ((pos.x & BPMX) + ((bits >> (5 - BDIMLOG2)) & (1 << BDIMLOG2)) - A.x) * rV.x;
 	float tmy = ((pos.y & BPMY) + ((bits >> (13 - BDIMLOG2)) & (1 << BDIMLOG2)) - A.y) * rV.y;
@@ -39,18 +51,18 @@ uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_on
 	while (true)
 	{
 		// check main grid
-		const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0 ) ).x;
-		if (o != 0) if ((o & 1) == 0) /* solid */ 
-		{ 
-			*dist = t, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
-			return o >> 1; 
+		const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0) ).x;
+		if (o != 0) if ((o & 1) == 0) /* solid */
+		{
+			*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+			return o >> 1;
 		}
 		else // brick
 		{
 			const float4 I = A + V * t;
-			uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) + 
-						(clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) + 
-						clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
+			uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) +
+					 (clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) +
+					  clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
 			const uint pn = p & TOPMASK3;
 			float dmx = (float)((p >> 20) + OFFS_X - A.x) * rV.x;
 			float dmy = (float)(((p >> 10) & 1023) + OFFS_Y - A.y) * rV.y;
@@ -59,10 +71,10 @@ uint TraceRay( const float4 A, const float4 B, float* dist, float3* N, __read_on
 			{
 				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
 				const unsigned int color = brick[idx];
-				if (color != 0U) 
-				{ 
-					*dist = d, *N = -(float3)( (last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z );
-					return color; 
+				if (color != 0U)
+				{
+					*dist = d, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+					return color;
 				}
 				d = min( dmx, min( dmy, dmz ) );
 				if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
@@ -92,12 +104,12 @@ float SphericalPhi( const float3 v )
 }
 
 uint WangHash( uint s ) { s = (s ^ 61) ^ (s >> 16), s *= 9, s = s ^ (s >> 4), s *= 0x27d4eb2d, s = s ^ (s >> 15); return s; }
-uint RandomInt( uint* s ) { *s ^= *s << 13, *s ^= *s >> 17, *s ^= *s << 5; return *s; }
+uint RandomInt( uint* s ) { *s ^= *s << 13, * s ^= *s >> 17, * s ^= *s << 5; return *s; }
 float RandomFloat( uint* s ) { return RandomInt( s ) * 2.3283064365387e-10f; }
 
 float3 DiffuseReflectionCosWeighted( const float r0, const float r1, const float3 N )
 {
-	const float3 T = normalize( cross( N, fabs( N.y ) > 0.99f ? (float3)( 1, 0, 0 ) : (float3)( 0, 1, 0 ) ) );
+	const float3 T = normalize( cross( N, fabs( N.y ) > 0.99f ? (float3)(1, 0, 0) : (float3)(0, 1, 0) ) );
 	const float3 B = cross( T, N );
 	const float term1 = TWOPI * r0, term2 = sqrt( 1 - r1 );
 	float c, s = sincos( term1, &c );
@@ -141,7 +153,7 @@ float3 PaniniProjection( float2 tc, const float fov, const float d )
 	float sinPhi = native_sqrt( max( 0.f, 1 - cosPhi * cosPhi ) );
 	if (tc.x < 0.0) sinPhi *= -1;
 	const float s = native_rsqrt( 1 + tanTheta * tanTheta );
-	return (float3)( sinPhi, tanTheta, cosPhi ) * s;
+	return (float3)(sinPhi, tanTheta, cosPhi) * s;
 }
 
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
@@ -152,11 +164,11 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	const int line = get_global_id( 1 );
 	const float2 uv = (float2)((float)column * params->oneOverRes.x, (float)line * params->oneOverRes.y);
 #if PANINI
-	const float3 V = PaniniProjection( (float2)( uv.x * 2 - 1, (uv.y * 2 - 1) * ((float)SCRHEIGHT / SCRWIDTH) ), PI / 5, 0.15f );
+	const float3 V = PaniniProjection( (float2)(uv.x * 2 - 1, (uv.y * 2 - 1) * ((float)SCRHEIGHT / SCRWIDTH)), PI / 5, 0.15f );
 	// multiply by improvised camera matrix
 	const float3 D = V.z * normalize( (params->p1 + params->p2) * 0.5f - params->E ) +
-					 V.x * normalize( params->p1 - params->p0 ) +
-					 V.y * normalize( params->p2 - params->p0 );
+		V.x * normalize( params->p1 - params->p0 ) +
+		V.y * normalize( params->p2 - params->p0 );
 #else
 	const float3 P = params->p0 + (params->p1 - params->p0) * uv.x + (params->p2 - params->p0) * uv.y;
 	const float3 D = normalize( P - params->E );
@@ -165,7 +177,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	// trace primary ray
 	float dist;
 	float3 N;
-	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick, GRIDWIDTH * 2 );
+	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick, 999999 /* no cap needed */ );
 
 	// visualize result
 	float3 pixel;
@@ -176,23 +188,23 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 		const uint u = (uint)(5000 * SphericalPhi( T ) * INV2PI - 0.5f);
 		const uint v = (uint)(2500 * SphericalTheta( T ) * INVPI - 0.5f);
 		const uint idx = u + v * 5000;
-		pixel = (idx < 5000 * 2500) ? sky[idx].xyz : (float3)( 1 );
+		pixel = (idx < 5000 * 2500) ? sky[idx].xyz : (float3)(1);
 	}
 	else
 	{
 		const float3 BRDF1 = INVPI * (float3)((voxel >> 5) * (1.0f / 7.0f), ((voxel >> 2) & 7) * (1.0f / 7.0f), (voxel & 3) * (1.0f / 3.0f));
 	#if GIRAYS > 0
-		float3 incoming = (float3)( 0, 0, 0 );
+		float3 incoming = (float3)(0, 0, 0);
 		uint seed = WangHash( column * 171 + line * 1773 + params->R0 );
-		const float4 I = (float4)( params->E + D * dist, 1 );
-		for( int i = 0; i < GIRAYS; i++ )
+		const float4 I = (float4)(params->E + D * dist, 1);
+		for (int i = 0; i < GIRAYS; i++)
 		{
 			const float r0 = blueNoiseSampler( blueNoise, column, line, i + GIRAYS * params->frame, 0 );
 			const float r1 = blueNoiseSampler( blueNoise, column, line, i + GIRAYS * params->frame, 1 );
-			const float4 R = (float4)( DiffuseReflectionCosWeighted( r0, r1, N ), 1 );
+			const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
 			float3 N2;
 			float dist2;
-			const uint voxel2 = TraceRay( I + 0.1f * (float4)( N, 1 ), R, &dist2, &N2, grid, brick, GRIDWIDTH / 12 );
+			const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick, GRIDWIDTH / 12 /* cap on GI ray length */ );
 			if (voxel2 == 0)
 			{
 				// sky
@@ -200,7 +212,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 				const uint u = (uint)(5000 * SphericalPhi( T ) * INV2PI - 0.5f);
 				const uint v = (uint)(2500 * SphericalTheta( T ) * INVPI - 0.5f);
 				const uint idx = u + v * 5000;
-				incoming += 4 * ((idx < 5000 * 2500) ? sky[idx].xyz : (float3)( 1 ));
+				incoming += 4 * ((idx < 5000 * 2500) ? sky[idx].xyz : (float3)(1));
 			}
 			else
 			{
@@ -223,7 +235,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 		);
 	#endif
 	}
-	write_imagef( outimg, (int2)(column, line), (float4)( pixel, 1 ) );
+	write_imagef( outimg, (int2)(column, line), (float4)(pixel, 1) );
 }
 
 __kernel void commit( const int taskCount, __global uint* commit, __global uint* brick )

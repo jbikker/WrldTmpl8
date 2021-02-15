@@ -24,7 +24,7 @@ void Print( const char* text, const int3 pos, const uint c );
 void Print( const char* text, const uint3 pos, const uint c );
 uint LoadSprite( const char* voxFile );
 uint CloneSprite( const uint idx );
-void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z, const uint frame = 0 );
+void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z );
 void MoveSpriteTo( const uint idx, const int3 pos );
 void MoveSpriteTo( const uint idx, const uint3 pos );
 uint LoadTile( const char* voxFile );
