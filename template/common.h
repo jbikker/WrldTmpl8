@@ -1,6 +1,6 @@
 // default screen resolution
-#define SCRWIDTH	1600
-#define SCRHEIGHT	900
+#define SCRWIDTH	1280
+#define SCRHEIGHT	720
 
 // IMPORTANT NOTE ON OPENCL COMPATIBILITY ON OLDER LAPTOPS:
 // Without a GPU, a laptop needs at least a 'Broadwell' Intel CPU (5th gen, 2015):
@@ -8,7 +8,6 @@
 // Same is true for Vulkan, OpenGL 4.0 and beyond, as well as DX11 and DX12.
 
 // TODO:
-// - The size of the commit buffer affects performance. Tweak how much is sent per frame.
 // - If we have enough bricks for the full map, each brick pos can point to a fixed brick.
 // - An irregular grid may be faster.
 // - Add TAA and GI. :)
@@ -26,6 +25,9 @@
 
 // Panini projection, http://tksharpless.net/vedutismo/Pannini/panini.pdf via https://www.shadertoy.com/view/Wt3fzB
 #define PANINI		1
+
+// Set to CPUONLY to 1 to force cpu-only rendering (UNDER CONSTRUCTION)
+#define CPUONLY		0
 
 // hardware
 // #define CPU_HAS_BMI2		// cpu supports BMI2 instructions; Haswell (2013) / AMD Excavator (2015)

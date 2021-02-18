@@ -109,6 +109,9 @@ public:
 	void DrawTiles( const char* tileString, const uint x, const uint y, const uint z );
 	void DrawBigTile( const uint idx, const uint x, const uint y, const uint z );
 	void DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z );
+	// inline ray tracing / cpu-only ray tracing
+	uint TraceRay( float4 A, const float4 B, float& dist, float3& N, int steps );
+	void TracePacket( float3 O, const float3 P1, const float3 P2, const float3 P3, const float3 P4 );
 	// block scrolling
 	void ScrollX( const int offset );
 	void ScrollY( const int offset );
@@ -254,7 +257,8 @@ private:
 	volatile inline static LONG trashHead = BRICKCOUNT;	// thrash circular buffer tail
 	volatile inline static LONG trashTail = 0;	// thrash circular buffer tail
 	uint* trash = 0;					// indices of recycled bricks
-	Buffer* screen;						// OpenCL buffer that encapsulates the target OpenGL texture
+	Buffer* screen = 0;					// OpenCL buffer that encapsulates the target OpenGL texture
+	uint targetTextureID = 0;			// OpenGL render target
 	Buffer* prevFrame[2];				// storage for the previous frame, for TAA
 	int prevFrameIdx = 0;				// index of the previous frame buffer that will be used for TAA
 	Buffer* paramBuffer;				// OpenCL buffer that stores renderer parameters

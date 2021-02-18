@@ -6,6 +6,21 @@ using namespace Tmpl8;
 static const uint gridSize = GRIDSIZE * sizeof( uint );
 static const uint commitSize = BRICKCOMMITSIZE + gridSize;
 
+// helper defines for inline ray tracing
+#define OFFS_X		((bits >> 5) & 1)			// extract grid plane offset over x (0 or 1)
+#define OFFS_Y		((bits >> 13) & 1)			// extract grid plane offset over y (0 or 1)
+#define OFFS_Z		(bits >> 21)				// extract grid plane offset over z (0 or 1)
+#define DIR_X		((bits & 3) - 1)			// ray dir over x (-1 or 1)
+#define DIR_Y		(((bits >> 8) & 3) - 1)		// ray dir over y (-1 or 1)
+#define DIR_Z		(((bits >> 16) & 3) - 1)	// ray dir over z (-1 or 1)
+#define BMSK		(BRICKDIM - 1)
+#define BDIM2		(BRICKDIM * BRICKDIM)
+#define BPMX		(MAPWIDTH - BRICKDIM)
+#define BPMY		(MAPHEIGHT - BRICKDIM)
+#define BPMZ		(MAPDEPTH - BRICKDIM)
+#define TOPMASK3	(((1023 - BMSK) << 20) + ((1023 - BMSK) << 10) + (1023 - BMSK))
+#define SELECT(a,b,c) ((c)?(b):(a))
+
 // World Constructor
 // ----------------------------------------------------------------------------
 World::World( const uint targetID )
@@ -46,10 +61,11 @@ World::World( const uint targetID )
 	printf( "Allocated %iKB on CPU for bitfield.\n", (int)(BRICKCOUNT >> 15) );
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
+	paramBuffer = new Buffer( sizeof( RenderParams ) / 4, Buffer::DEFAULT | Buffer::READONLY, &params );
+#if CPUONLY == 0
+	screen = new Buffer( targetID, Buffer::TARGET );
 	renderer = new Kernel( "cl/kernels.cl", "render" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
-	screen = new Buffer( targetID, Buffer::TARGET );
-	paramBuffer = new Buffer( sizeof( RenderParams ) / 4, Buffer::DEFAULT | Buffer::READONLY, &params );
 	renderer->SetArgument( 0, screen );
 	renderer->SetArgument( 1, paramBuffer );
 	renderer->SetArgument( 2, &gridMap );
@@ -69,6 +85,8 @@ World::World( const uint targetID )
 	blueNoise->CopyToDevice();
 	delete data32;
 	renderer->SetArgument( 5, blueNoise );
+#endif
+	targetTextureID = targetID;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
 }
@@ -137,21 +155,21 @@ void World::ScrollX( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollX( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
 	const int o = abs( offset / BRICKDIM );
-	for( uint z = 0; z < GRIDDEPTH; z++ ) for( uint y = 0; y < GRIDHEIGHT; y++ )
+	for (uint z = 0; z < GRIDDEPTH; z++) for (uint y = 0; y < GRIDHEIGHT; y++)
 	{
 		uint* line = grid + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
 		uint backup[GRIDWIDTH];
 		if (offset < 0)
 		{
-			for( int x = 0; x < o; x++ ) backup[x] = line[x];
-			for( int x = o; x < GRIDWIDTH; x++ ) line[x - o] = line[x];
-			for( int x = 0; x < o; x++ ) line[GRIDWIDTH - 1 - o + x] = backup[x];
+			for (int x = 0; x < o; x++) backup[x] = line[x];
+			for (int x = o; x < GRIDWIDTH; x++) line[x - o] = line[x];
+			for (int x = 0; x < o; x++) line[GRIDWIDTH - 1 - o + x] = backup[x];
 		}
 		else
 		{
-			for( int x = 0; x < o; x++ ) backup[x] = line[GRIDWIDTH - 1 - o + x];
-			for( int x = GRIDWIDTH - 1; x >= o; x-- ) line[x] = line[x - o];
-			for( int x = 0; x < o; x++ ) line[x] = backup[x];
+			for (int x = 0; x < o; x++) backup[x] = line[GRIDWIDTH - 1 - o + x];
+			for (int x = GRIDWIDTH - 1; x >= o; x--) line[x] = line[x - o];
+			for (int x = 0; x < o; x++) line[x] = backup[x];
 		}
 	}
 }
@@ -512,7 +530,7 @@ void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint 
 // ----------------------------------------------------------------------------
 void World::DrawTiles( const char* tileString, const uint x, const uint y, const uint z )
 {
-	for( uint s = (uint)strlen( tileString ), i = 0; i < s; i++ ) 
+	for (uint s = (uint)strlen( tileString ), i = 0; i < s; i++)
 	{
 		const char t = tileString[i];
 		DrawTile( tileString[i] - '0', x + i, y, z );
@@ -547,10 +565,190 @@ void World::DrawBigTile( const uint idx, const uint x, const uint y, const uint 
 // ----------------------------------------------------------------------------
 void World::DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z )
 {
-	for( uint s = (uint)strlen( tileString ), i = 0; i < s; i++ )
+	for (uint s = (uint)strlen( tileString ), i = 0; i < s; i++)
 	{
 		const char t = tileString[i];
 		if (t != ' ') DrawBigTile( tileString[i] - '0', x + i, y, z );
+	}
+}
+
+// World::Trace
+// ----------------------------------------------------------------------------
+float4 FixZeroDeltas( float4 V )
+{
+	if (fabs( V.x ) < 1e-8f) V.x = V.x < 0 ? -1e-8f : 1e-8f;
+	if (fabs( V.y ) < 1e-8f) V.y = V.y < 0 ? -1e-8f : 1e-8f;
+	if (fabs( V.z ) < 1e-8f) V.z = V.z < 0 ? -1e-8f : 1e-8f;
+	return V;
+}
+uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int steps )
+{
+	const float4 V = FixZeroDeltas( B ), rV = make_float4( 1 / V.x, 1 / V.y, 1 / V.z, 1 );
+	const bool originOutsideGrid = A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH;
+	if (steps == 999999 && originOutsideGrid)
+	{
+		// use slab test to clip ray origin against scene AABB
+		const float tx1 = -A.x * rV.x, tx2 = (MAPWIDTH - A.x) * rV.x;
+		float tmin = min( tx1, tx2 ), tmax = max( tx1, tx2 );
+		const float ty1 = -A.y * rV.y, ty2 = (MAPHEIGHT - A.y) * rV.y;
+		tmin = max( tmin, min( ty1, ty2 ) ), tmax = min( tmax, max( ty1, ty2 ) );
+		const float tz1 = -A.z * rV.z, tz2 = (MAPDEPTH - A.z) * rV.z;
+		tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
+		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
+	}
+	uint4 pos = make_uint4( clamp( (int)A.x, 0, MAPWIDTH - 1 ), clamp( (int)A.y, 0, MAPHEIGHT - 1 ), clamp( (int)A.z, 0, MAPDEPTH - 1 ), 0 );
+	const int bits = SELECT( 4, 34, V.x > 0 ) + SELECT( 3072, 10752, V.y > 0 ) + SELECT( 1310720, 3276800, V.z > 0 ); // magic
+	float tmx = ((float)((pos.x & BPMX) + ((bits >> (5 - BDIMLOG2)) & (1 << BDIMLOG2))) - A.x) * rV.x;
+	float tmy = ((float)((pos.y & BPMY) + ((bits >> (13 - BDIMLOG2)) & (1 << BDIMLOG2))) - A.y) * rV.y;
+	float tmz = ((float)((pos.z & BPMZ) + ((bits >> (21 - BDIMLOG2)) & (1 << BDIMLOG2))) - A.z) * rV.z, t = 0;
+	const float tdx = (float)DIR_X * rV.x, tdy = (float)DIR_Y * rV.y, tdz = (float)DIR_Z * rV.z;
+	uint last = 0;
+	while (true)
+	{
+		// check main grid
+		const uint o = grid[pos.x / BRICKDIM + (pos.z / BRICKDIM) * GRIDWIDTH + (pos.y / BRICKDIM) * GRIDWIDTH * GRIDDEPTH];
+		if (o != 0) if ((o & 1) == 0) /* solid */
+		{
+			dist = t, N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+			return o >> 1;
+		}
+		else // brick
+		{
+			const float4 I = A + V * t;
+			uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) +
+				(clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) +
+				clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
+			const uint pn = p & TOPMASK3;
+			float dmx = ((float)((p >> 20) + OFFS_X) - A.x) * rV.x;
+			float dmy = ((float)(((p >> 10) & 1023) + OFFS_Y) - A.y) * rV.y;
+			float dmz = ((float)((p & 1023) + OFFS_Z) - A.z) * rV.z, d = t;
+			do
+			{
+				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+				const unsigned int color = brick[idx];
+				if (color != 0U)
+				{
+					dist = d, N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+					return color;
+				}
+				d = min( dmx, min( dmy, dmz ) );
+				if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
+				if (d == dmy) dmy += tdy, p += DIR_Y << 10, last = 1;
+				if (d == dmz) dmz += tdz, p += DIR_Z, last = 2;
+			} while ((p & TOPMASK3) == pn);
+		}
+		if (!--steps) break;
+		t = min( tmx, min( tmy, tmz ) );
+		if (t == tmx) tmx += tdx * BRICKDIM, pos.x += DIR_X * BRICKDIM, last = 0;
+		if (t == tmy) tmy += tdy * BRICKDIM, pos.y += DIR_Y * BRICKDIM, last = 1;
+		if (t == tmz) tmz += tdz * BRICKDIM, pos.z += DIR_Z * BRICKDIM, last = 2;
+		if ((pos.x & (65536 - MAPWIDTH)) + (pos.y & (65536 - MAPWIDTH)) + (pos.z & (65536 - MAPWIDTH))) break;
+	}
+	return 0U;
+}
+
+static float packet_t[64];
+static uint packet_voxel[64];
+static float3 packet_N[64];
+
+// World::TracePacket
+// ----------------------------------------------------------------------------
+void World::TracePacket( float3 O, const float3 P1, const float3 P2, const float3 P3, const float3 P4 )
+{
+	// Ray Tracing Animated Scenes using Coherent Grid Traversal, Wald et al., 2006
+	// 0. Generate tile rays, TODO: postpone until actually needed?
+	float3 D[64], rD[64];
+	uint b[64];
+	for (int i = 0, y = 0; y < 8; y++) for (int x = 0; x < 8; x++, i++)
+	{
+		float3 P = P1 + (P2 - P1) * ((float)x / 7.0f) + (P4 - P1) * ((float)y / 7.0f);
+		D[i] = normalize( P - O );
+		rD[i] = make_float3( 1.0f / D[i].x, 1.0f / D[i].y, 1.0f / D[i].z );
+		packet_t[i] = 1e34f;
+		b[i] = SELECT( 4, 34, D[i].x > 0 ) + SELECT( 3072, 10752, D[i].y > 0 ) + SELECT( 1310720, 3276800, D[i].z > 0 ); // magic
+	}
+	// 1. Find dominant axis
+	const float3 D1 = normalize( P1 - O ), D2 = normalize( P2 - O ); // TODO: normalization not needed?
+	const float3 D3 = normalize( P3 - O ), D4 = normalize( P4 - O );
+	uint k = dominantAxis( D1 );
+	if (k == 0)
+	{
+		// x is major axis; u = y and v = z.
+		const float4 delta = make_float4(
+			min( min( D1.y, D2.y ), min( D3.y, D4.y ) ), max( max( D1.y, D2.y ), max( D3.y, D4.y ) ),
+			min( min( D1.z, D2.z ), min( D3.z, D4.z ) ), max( max( D1.z, D2.z ), max( D3.z, D4.z ) )
+		);
+		// start stepping
+		int w = (int)O.x / 8, dir = D1.x > 0 ? 1 : -1;
+		float4 frustum = make_float4( O.y, O.y, O.z, O.z );
+		while (1)
+		{
+			frustum += delta;
+			int4 uvcells = make_int4( frustum * (1.0f / BRICKDIM) );
+			uvcells.x = max( 0, uvcells.x );
+			uvcells.y = max( 0, uvcells.y );
+			uvcells.z = min( GRIDHEIGHT - 1, uvcells.z );
+			uvcells.w = min( GRIDDEPTH - 1, uvcells.w );
+			for (int v = uvcells.z; v <= uvcells.w; v++) for (int u = uvcells.x; u <= uvcells.y; u++)
+			{
+				const uint g = grid[w + v * GRIDWIDTH + u * GRIDWIDTH * GRIDDEPTH];
+				if (g)
+				{
+					for (int i = 0; i < 64; i++) if (packet_t[i] > 1e33f /* ray did not find a voxel yet */)
+					{
+						const uint bits = b[i];
+						const float tdx = (float)DIR_X * rD[i].x, tdy = (float)DIR_Y * rD[i].y, tdz = (float)DIR_Z * rD[i].z;
+						uint last = 0;
+						// TODO: we can probably just test three planes based on 'bits'?
+						const float tx1 = ((float)w * BRICKDIM - O.x) * rD[i].x, tx2 = (((float)w * BRICKDIM + BRICKDIM) - O.x) * rD[i].x;
+						float tmin = min( tx1, tx2 ), tmax = max( tx1, tx2 );
+						const float ty1 = ((float)u * BRICKDIM - O.y) * rD[i].y, ty2 = (((float)u * BRICKDIM + BRICKDIM) - O.y) * rD[i].y;
+						tmin = max( tmin, min( ty1, ty2 ) ), tmax = min( tmax, max( ty1, ty2 ) );
+						const float tz1 = ((float)v * BRICKDIM - O.z) * rD[i].z, tz2 = (((float)v * BRICKDIM + BRICKDIM) - O.z) * rD[i].z;
+						tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
+						if (tmax > tmin && tmax > 0 /* TODO: tmax > 0 superfluous? */)
+						{
+							float3 E = O + tmin * D[i]; // this is where the ray enters the voxel
+							if (g >> 1)
+							{
+								// solid supervoxel; finalize ray
+								packet_t[i] = tmin;
+								packet_N[i] = make_float3( 0, 1, 0 ); // TODO: determine actual normal
+								packet_voxel[i] = g >> 1;
+							}
+							else
+							{
+								// traverse brick
+								uint p = (clamp( (uint)E.x, (uint)w * BRICKDIM, (uint)w * BRICKDIM + BRICKDIM - 1 ) << 20) +
+									(clamp( (uint)E.y, (uint)u * BRICKDIM, (uint)u * BRICKDIM + BRICKDIM - 1 ) << 10) +
+									clamp( (uint)E.z, (uint)v * BRICKDIM, (uint)v * BRICKDIM + BRICKDIM - 1 );
+								const uint pn = p & TOPMASK3;
+								float dmx = ((float)((p >> 20) + OFFS_X) - O.x) * rD[i].x;
+								float dmy = ((float)(((p >> 10) & 1023) + OFFS_Y) - O.y) * rD[i].y;
+								float dmz = ((float)((p & 1023) + OFFS_Z) - O.z) * rD[i].z, d = tmin;
+								do
+								{
+									const uint idx = (g >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+									const unsigned int c = brick[idx];
+									if (c != 0U)
+									{
+										packet_t[i] = d;
+										packet_N[i] = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+										packet_voxel[i] = c;
+									}
+									d = min( dmx, min( dmy, dmz ) );
+									if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
+									if (d == dmy) dmy += tdy, p += DIR_Y << 10, last = 1;
+									if (d == dmz) dmz += tdz, p += DIR_Z, last = 2;
+								} while ((p & TOPMASK3) == pn);
+							}
+						}
+					}
+				}
+			}
+			w += dir;
+			if (w < 0 || w >= GRIDWIDTH) break;
+		}
 	}
 }
 
@@ -583,18 +781,8 @@ to ensure it completes before the commit kernel is executed on this data.
 // ----------------------------------------------------------------------------
 void World::Render()
 {
-	// finalize the asynchronous copy by executing the commit kernel
-	if (copyInFlight)
-	{
-		if (tasks > 0)
-		{
-			committer->SetArgument( 0, (int)tasks );
-			committer->Run( (tasks + 63) & (65536 - 32), 4, &copyDone, &commitDone );
-		}
-		copyInFlight = false, commitInFlight = true;
-	}
-	// run rendering kernel
-	mat4 M = camMat;
+	// prepare for rendering
+	const mat4 M = camMat;
 	const float aspectRatio = (float)SCRWIDTH / SCRHEIGHT;
 	params.E = TransformPosition( make_float3( 0 ), M );
 	params.oneOverRes = make_float2( 1.0f / SCRWIDTH, 1.0f / SCRHEIGHT );
@@ -604,8 +792,104 @@ void World::Render()
 	params.R0 = RandomUInt();
 	static uint frame = 0;
 	params.frame = frame++;
+#if CPUONLY == 0
+	// default path: use GPU to render current world state in the background
+	if (copyInFlight)
+	{
+		// finalize the asynchronous copy by executing the commit kernel
+		if (tasks > 0)
+		{
+			committer->SetArgument( 0, (int)tasks );
+			committer->Run( (tasks + 63) & (65536 - 32), 4, &copyDone, &commitDone );
+		}
+		copyInFlight = false, commitInFlight = true;
+	}
+	// get render parameters to GPU and invoke kernel asynchronously
 	paramBuffer->CopyToDevice( false );
 	renderer->Run( screen, make_int2( 32, 4 ) );
+#else
+	// CPU-only path
+	static Surface* target = 0;
+	if (!target) target = new Surface( SCRWIDTH, SCRHEIGHT );
+#if 0
+	// reference flow, single ray traversal - WARNING: SLOW
+#pragma omp parallel for schedule (dynamic)
+	for (int y = 0; y < SCRHEIGHT; y++)
+	{
+		float2 uv;
+		uv.y = (float)y / SCRHEIGHT;
+		for (int x = 0; x < SCRWIDTH; x++)
+		{
+			// create primary ray
+			uv.x = (float)x / SCRWIDTH;
+			const float3 P = params.p0 + (params.p1 - params.p0) * uv.x + (params.p2 - params.p0) * uv.y;
+			const float3 D = normalize( P - params.E );
+			// trace primary ray
+			float dist;
+			float3 N;
+			const uint voxel = TraceRay( make_float4( params.E, 1 ), make_float4( D, 1 ), dist, N, 999999 /* no cap needed */ );
+			// visualize result
+			float3 pixel;
+			if (voxel == 0) pixel = make_float3( 0.5f, 0.5f, 1.0f ); /* sky, for now */ else
+			{
+				const float3 BRDF1 = INVPI * make_float3( (float)(voxel >> 5) * (1 / 7.0f), (float)((voxel >> 2) & 7) * (1 / 7.0f), (float)(voxel & 3) * (1 / 3.0f) );
+				// hardcoded lights - image based lighting, no visibility test
+				pixel = BRDF1 * 2 * (
+					(N.x * N.x) * ((-N.x + 1) * make_float3( NX0 ) + (N.x + 1) * make_float3( NX1 )) +
+					(N.y * N.y) * ((-N.y + 1) * make_float3( NY0 ) + (N.y + 1) * make_float3( NY1 )) +
+					(N.z * N.z) * ((-N.z + 1) * make_float3( NZ0 ) + (N.z + 1) * make_float3( NZ1 ))
+				);
+			}
+			const int r = (int)(sqrtf( clamp( pixel.x, 0.0f, 1.0f ) ) * 255.0f);
+			const int g = (int)(sqrtf( clamp( pixel.y, 0.0f, 1.0f ) ) * 255.0f);
+			const int b = (int)(sqrtf( clamp( pixel.z, 0.0f, 1.0f ) ) * 255.0f);
+			target->buffer[x + y * SCRWIDTH] = r + (g << 8) + (b << 16);
+		}
+	}
+#else
+	// tile / packet renderer
+	for (int y = 0; y < SCRHEIGHT / 8; y++)
+	{
+		for (int x = 0; x < SCRWIDTH / 8; x++)
+		{
+			// create primary ray
+			const float2 uv0 = make_float2( (float)x / SCRHEIGHT, (float)y / SCRHEIGHT );
+			const float2 uv1 = make_float2( (float)(x + 7) / SCRHEIGHT, (float)(y + 7) / SCRHEIGHT );
+			const float3 P1 = params.p0 + (params.p1 - params.p0) * uv0.x + (params.p2 - params.p0) * uv0.y;
+			const float3 P2 = params.p0 + (params.p1 - params.p0) * uv1.x + (params.p2 - params.p0) * uv0.y;
+			const float3 P3 = params.p0 + (params.p1 - params.p0) * uv1.x + (params.p2 - params.p0) * uv1.y;
+			const float3 P4 = params.p0 + (params.p1 - params.p0) * uv0.x + (params.p2 - params.p0) * uv1.y;
+			TracePacket( params.E, P1, P2, P3, P4 );
+			// visualize result
+			for (int v = 0; v < 8; v++) for (int u = 0; u < 8; u++)
+			{
+				const uint voxel = packet_voxel[u + v * 8];
+				const float3 N = packet_N[u + v * 8];
+				// visualize result
+				float3 pixel;
+				if (voxel == 0) pixel = make_float3( 0.5f, 0.5f, 1.0f ); /* sky, for now */ else
+				{
+					const float3 BRDF1 = INVPI * make_float3( (float)(voxel >> 5) * (1 / 7.0f), (float)((voxel >> 2) & 7) * (1 / 7.0f), (float)(voxel & 3) * (1 / 3.0f) );
+					// hardcoded lights - image based lighting, no visibility test
+					pixel = BRDF1 * 2 * (
+						(N.x * N.x) * ((-N.x + 1) * make_float3( NX0 ) + (N.x + 1) * make_float3( NX1 )) +
+						(N.y * N.y) * ((-N.y + 1) * make_float3( NY0 ) + (N.y + 1) * make_float3( NY1 )) +
+						(N.z * N.z) * ((-N.z + 1) * make_float3( NZ0 ) + (N.z + 1) * make_float3( NZ1 ))
+					);
+				}
+				const int r = (int)(sqrtf( clamp( pixel.x, 0.0f, 1.0f ) ) * 255.0f);
+				const int g = (int)(sqrtf( clamp( pixel.y, 0.0f, 1.0f ) ) * 255.0f);
+				const int b = (int)(sqrtf( clamp( pixel.z, 0.0f, 1.0f ) ) * 255.0f);
+				target->buffer[x * 8 + u + (y * 8 + v) * SCRWIDTH] = r + (g << 8) + (b << 16);
+			}
+		}
+	}
+#endif
+	glBindTexture( GL_TEXTURE_2D, targetTextureID );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, SCRWIDTH, SCRHEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, target->buffer );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	CheckGL();
+#endif
 }
 
 // World::Commit
@@ -667,10 +951,10 @@ void World::Commit()
 void World::CheckBrick( const uint idx )
 {
 	int zeroCount = 0;
-	for( int q = 0; q < BRICKSIZE; q++ ) if (brick[idx * BRICKSIZE + q] == 0) zeroCount++;
+	for (int q = 0; q < BRICKSIZE; q++) if (brick[idx * BRICKSIZE + q] == 0) zeroCount++;
 	if (zeroCount != brickInfo[idx].zeroes)
 	{
-		for( int i = 0; i < GRIDSIZE; i++ ) if (grid[i] == ((idx << 1)|1))
+		for (int i = 0; i < GRIDSIZE; i++) if (grid[i] == ((idx << 1) | 1))
 		{
 			int w = 0;
 			FatalError( "Bad brick!" );

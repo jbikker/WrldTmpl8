@@ -137,6 +137,20 @@ void ZLine( const uint x, const uint y, const uint z, int l, const uint c )
 }
 void ZLine( const uint3 pos, int l, const uint c ) { ZLine( pos.x, pos.y, pos.z, l, c ); }
 void ZLine( const int3 pos, int l, const uint c ) { ZLine( pos.x, pos.y, pos.z, l, c ); }
+bool IsOccluded( const float3 P1, const float3 P2 )
+{
+	float dist, len = length( P2 - P1 ) - 0.002f;
+	float3 dummy, D = (P2 - P1 ) * (1.0f / len); // normalize without recalculating square root
+	world->TraceRay( make_float4( P1 + 0.001f * D, 1 ), make_float4( D, 1 ), dist, dummy, 999999 );
+	return dist < len;
+}
+float Trace( const float3 P1, const float3 P2 )
+{
+	float dist;
+	float3 dummy, D = normalize( P2 - P1 );
+	world->TraceRay( make_float4( P1 + 0.001f * D, 1 ), make_float4( D, 1 ), dist, dummy, 999999 );
+	return dist;
+}
 
 // GLFW callbacks
 void ReshapeWindowCallback( GLFWwindow* window, int w, int h )
@@ -486,7 +500,7 @@ GLTexture::GLTexture( uint w, uint h, uint type )
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
-		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0 );
+		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0 );
 	}
 	else /* type == FLOAT */
 	{
