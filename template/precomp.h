@@ -49,6 +49,9 @@ using namespace std;
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
+// zlib
+#include "zlib.h"
+
 // namespaces
 namespace Tmpl8 { class World; };
 using namespace Tmpl8;

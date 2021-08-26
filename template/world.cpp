@@ -58,7 +58,7 @@ World::World( const uint targetID )
 	modifiedBackup.ClearMarks();
 	// prepare a test world
 	DummyWorld();
-	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin" );
+	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz" );
 	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
@@ -208,9 +208,21 @@ void World::ScrollZ( const int offset )
 // ----------------------------------------------------------------------------
 void World::LoadSky( const char* filename, const char* bin_name )
 {
-	// attempt to load skydome from binary file
-	ifstream f( bin_name, ios::binary );
+	// attempt to load skydome from compressed binary file
 	float* pixels = 0;
+#if 1
+	gzFile f = gzopen( bin_name, "rb" );
+	if (f != Z_NULL)
+	{
+		printf( "loading compressed cached hdr data... " );
+		gzread( f, &skySize.x, 4 );
+		gzread( f, &skySize.y, 4 );
+		pixels = (float*)MALLOC64( skySize.x * skySize.y * sizeof( float ) * 3 );
+		gzread( f, pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
+		gzclose( f );
+	}
+#else
+	ifstream f( bin_name, ios::binary );
 	if (f.is_open())
 	{
 		printf( "loading cached hdr data... " );
@@ -220,6 +232,7 @@ void World::LoadSky( const char* filename, const char* bin_name )
 		pixels = (float*)MALLOC64( skySize.x * skySize.y * sizeof( float ) * 3 );
 		f.read( (char*)pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
 	}
+#endif
 	if (!pixels)
 	{
 	#if 0
