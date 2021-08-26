@@ -1,0 +1,22 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  SAP Visual Enterprise Author x64 7.0.2.65
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl Rock_1
+Ka 0 0 0
+Kd 1 1 1
+Ks 0.5 0.5 0.5
+illum 2
+Ns 8
+map_Kd base.png
+map_bump 
+bump 
+map_opacity 
+map_d 
+refl 
+map_kS 
+map_kA 
+map_Ns 

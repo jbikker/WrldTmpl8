@@ -27,7 +27,7 @@ static GLTexture* renderTarget = 0;
 static int scrwidth = 0, scrheight = 0;
 
 char* fileName = 0;
-int maxSize = 127;
+int maxSize = 160;
 
 // GLFW callbacks
 void ReshapeWindowCallback( GLFWwindow* window, int w, int h )

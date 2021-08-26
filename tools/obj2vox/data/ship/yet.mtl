@@ -1,0 +1,31 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  SAP Visual Enterprise Author x64 7.0.2.65
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl lambert2SG
+Ka 0 0 0
+Kd 1 1 1
+Ks 0.5 0.5 0.5
+
+newmtl blinn1SG
+Ka 0.04 0.04 0.04
+Kd 0 0 0
+Ks 0.5 0.5 0.5
+
+newmtl initialShadingGroup
+Ka 0 0 0
+Kd 1 1 1
+Ks 0.5 0.5 0.5
+
+newmtl blinn5SG
+Ka 0 0 0
+Kd 1 0.5 0.4
+Ks 0.5 0.5 0.5
+
+newmtl lambert3SG
+Ka 0 0 0
+Kd 1 0.5 0.2 
+Ks 0.5 0.5 0.5

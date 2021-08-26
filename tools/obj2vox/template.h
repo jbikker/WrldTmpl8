@@ -3,6 +3,8 @@
 
 #pragma once
 
+#define PI	3.1415926535898f
+
 // Basic types
 typedef unsigned char uchar;
 typedef unsigned int uint;

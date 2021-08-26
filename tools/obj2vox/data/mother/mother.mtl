@@ -1,0 +1,22 @@
+# 
+# Wavefront material file
+# Converted by the DEEP Exploration  SAP Visual Enterprise Author x64 7.0.2.65
+# Right Hemisphere, LTD
+# http://www.righthemisphere.com/
+# 
+
+newmtl aiStandard1
+Ka 0.5 0.5 0.5
+Kd 1 1 1
+Ks 0 0 0
+illum 2
+Ns 2048
+map_Kd defaultMat1_albedo.png
+map_bump 
+bump 
+map_opacity 
+map_d 
+refl 
+map_kS 
+map_kA 
+map_Ns 

@@ -1,6 +1,10 @@
 #include "precomp.h"
 #include "bluenoise.h"
 
+// Acknowledgements:
+// B&H'21 = Brian Janssen and Hugo Peters, INFOMOV'21 assignment
+// CO'21  = Christian Oliveros, INFOMOV'21 assignment
+
 using namespace Tmpl8;
 
 static const uint gridSize = GRIDSIZE * sizeof( uint );
@@ -26,9 +30,9 @@ static const uint commitSize = BRICKCOMMITSIZE + gridSize;
 World::World( const uint targetID )
 {
 	// create the commit buffer, used to sync CPU-side changes to the GPU
+	// NEW: fixed brick array, B&H'21
 	if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
 	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize, 0, 0 );
-	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
 	// store top-level grid in a 3D texture
 	cl_image_format fmt;
 	fmt.image_channel_order = CL_R;
@@ -42,37 +46,44 @@ World::World( const uint targetID )
 	gridMap = clCreateImage( Kernel::GetContext(), CL_MEM_HOST_NO_ACCESS, &fmt, &desc, 0, 0 );
 	// create brick storage
 	brick = (uchar*)_aligned_malloc( BRICKCOUNT * BRICKSIZE, 64 );
-	brickBuffer = new Buffer( (BRICKCOUNT * BRICKSIZE) / 4, Buffer::DEFAULT, brick );
-	brickInfo = new BrickInfo[BRICKCOUNT];
-	// create a cyclic array for unused bricks (all of them, for now)
-	trash = new uint[BRICKCOUNT];
-	memset( trash, 0, BRICKCOUNT * 4 );
-	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
+	brickBackup = (uchar*)_aligned_malloc( BRICKCOUNT * BRICKSIZE, 64 );
+	for (int i = 0; i < 4; i++)
+	{
+		assert( (BRICKCOUNT * BRICKSIZE / 4) == 4 * 64 * 1024 * 1024 /* bytes */ );
+		brickBuffer[i] = new Buffer( 64 /* dwords */ * 1024 * 1024, Buffer::DEFAULT, brick + 256 * 1024 * 1024 * i );
+	}
+	brickInfo = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
+	brickInfoBackup = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
+	// Clear the backup bitarray
+	modifiedBackup.ClearMarks();
 	// prepare a test world
-	grid = (uint*)_aligned_malloc( GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 64 );
-	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
 	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin" );
-	brickBuffer->CopyToDevice();
-	ClearMarks(); // clear 'modified' bit array
+	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
 	printf( "Allocated %iMB on CPU and GPU for %ik bricks.\n", (int)((BRICKCOUNT * BRICKSIZE) >> 20), (int)(BRICKCOUNT >> 10) );
 	printf( "Allocated %iKB on CPU for bitfield.\n", (int)(BRICKCOUNT >> 15) );
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
+	params.scroll = make_uint3( 0 ); // fast scroll system: B&H'21
 	paramBuffer = new Buffer( sizeof( RenderParams ) / 4, Buffer::DEFAULT | Buffer::READONLY, &params );
-#if CPUONLY == 0
 	screen = new Buffer( targetID, Buffer::TARGET );
 	renderer = new Kernel( "cl/kernels.cl", "render" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
 	renderer->SetArgument( 0, screen );
 	renderer->SetArgument( 1, paramBuffer );
 	renderer->SetArgument( 2, &gridMap );
-	renderer->SetArgument( 3, brickBuffer );
-	renderer->SetArgument( 4, sky );
+	renderer->SetArgument( 3, brickBuffer[0] );
+	renderer->SetArgument( 4, brickBuffer[1] );
+	renderer->SetArgument( 5, brickBuffer[2] );
+	renderer->SetArgument( 6, brickBuffer[3] );
+	renderer->SetArgument( 7, sky );
 	committer->SetArgument( 1, &devmem );
-	committer->SetArgument( 2, brickBuffer );
+	committer->SetArgument( 2, brickBuffer[0] );
+	committer->SetArgument( 3, brickBuffer[1] );
+	committer->SetArgument( 4, brickBuffer[2] );
+	committer->SetArgument( 5, brickBuffer[3] );
 	// prepare the bluenoise data
 	const uchar* data8 = (const uchar*)sob256_64; // tables are 8 bit per entry
 	uint* data32 = new uint[65536 * 5]; // we want a full uint per entry
@@ -84,8 +95,10 @@ World::World( const uint targetID )
 	blueNoise = new Buffer( 65536 * 5, Buffer::READONLY, data32 );
 	blueNoise->CopyToDevice();
 	delete data32;
-	renderer->SetArgument( 5, blueNoise );
-#endif
+	renderer->SetArgument( 8, blueNoise );
+	// pointer to commit buffer
+	cl_mem pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize, 0, 0 );
+	pinnedMemPtr = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, commitSize, 0, 0, 0, 0 );
 	targetTextureID = targetID;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
@@ -95,7 +108,25 @@ World::World( const uint targetID )
 // ----------------------------------------------------------------------------
 World::~World()
 {
+	cl_program sharedProgram = renderer->GetProgram();
+	delete committer;
+	delete renderer;
 	_aligned_free( brick );
+	for (int i = 0; i < 4; i++) delete brickBuffer[i];
+	_aligned_free( brickInfo );
+	delete screen;
+	delete paramBuffer;
+	delete sky;
+	delete blueNoise;
+	delete font;
+	clReleaseProgram( sharedProgram );
+}
+
+// World::ForceSyncAllBricks: send brick array to GPU
+// ----------------------------------------------------------------------------
+void World::ForceSyncAllBricks()
+{
+	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
 }
 
 // World::DummyWorld: box
@@ -105,19 +136,20 @@ void World::DummyWorld()
 	Clear();
 	for (int y = 0; y < 256; y++) for (int z = 0; z < 1024; z++)
 	{
-		Set( 0, y, z, 255 );
-		Set( 1023, y, z, 255 );
+		Set( 6, y, z, 255 );
+		Set( 1017, y, z, 255 );
 	}
 	for (int x = 0; x < 1024; x++) for (int z = 0; z < 1024; z++)
 	{
-		Set( x, 0, z, 255 );
-		Set( x, 255, z, 255 );
+		Set( x, 6, z, 255 );
+		Set( x, 257, z, 255 );
 	}
 	for (int x = 0; x < 1024; x++) for (int y = 0; y < 256; y++)
 	{
-		Set( x, y, 0, 255 );
-		Set( x, y, 1023, 255 );
+		Set( x, y, 6, 255 );
+		Set( x, y, 1017, 255 );
 	}
+	// performance note: these coords prevent exessive brick traversal.
 }
 
 // World::Clear
@@ -126,10 +158,9 @@ void World::Clear()
 {
 #if 1
 	// easiest top just clear the top-level grid and recycle all bricks
-	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
-	memset( trash, 0, BRICKCOUNT * 4 );
-	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
-	ClearMarks();
+	memset( brickInfo, 0, BRICKCOUNT * sizeof( BrickInfo ) );
+	memset( brick, 0, BRICKCOUNT * BRICKSIZE );
+	modified.ClearMarks();
 #else
 	for (int z = 0; z < GRIDDEPTH; z++) for (int y = 0; y < GRIDHEIGHT; y++) for (int x = 0; x < GRIDWIDTH; x++)
 	{
@@ -154,24 +185,7 @@ void World::Clear()
 void World::ScrollX( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollX( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
-	const int o = abs( offset / BRICKDIM );
-	for (uint z = 0; z < GRIDDEPTH; z++) for (uint y = 0; y < GRIDHEIGHT; y++)
-	{
-		uint* line = grid + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
-		uint backup[GRIDWIDTH];
-		if (offset < 0)
-		{
-			for (int x = 0; x < o; x++) backup[x] = line[x];
-			for (int x = o; x < GRIDWIDTH; x++) line[x - o] = line[x];
-			for (int x = 0; x < o; x++) line[GRIDWIDTH - 1 - o + x] = backup[x];
-		}
-		else
-		{
-			for (int x = 0; x < o; x++) backup[x] = line[GRIDWIDTH - 1 - o + x];
-			for (int x = GRIDWIDTH - 1; x >= o; x--) line[x] = line[x - o];
-			for (int x = 0; x < o; x++) line[x] = backup[x];
-		}
-	}
+	params.scroll.x += offset / BRICKDIM;
 }
 
 // World::ScrollX
@@ -179,7 +193,7 @@ void World::ScrollX( const int offset )
 void World::ScrollY( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollY( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
-	// TODO
+	params.scroll.y += offset / BRICKDIM;
 }
 
 // World::ScrollX
@@ -187,7 +201,7 @@ void World::ScrollY( const int offset )
 void World::ScrollZ( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollZ( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
-	// TODO
+	params.scroll.z += offset / BRICKDIM;
 }
 
 // World::LoadSky
@@ -197,7 +211,7 @@ void World::LoadSky( const char* filename, const char* bin_name )
 	// attempt to load skydome from binary file
 	ifstream f( bin_name, ios::binary );
 	float* pixels = 0;
-	if (f)
+	if (f.is_open())
 	{
 		printf( "loading cached hdr data... " );
 		f.read( (char*)&skySize.x, sizeof( skySize.x ) );
@@ -208,6 +222,7 @@ void World::LoadSky( const char* filename, const char* bin_name )
 	}
 	if (!pixels)
 	{
+	#if 0
 		// load skydome from original .hdr file
 		printf( "loading original hdr data... " );
 		FREE_IMAGE_FORMAT fif = FIF_UNKNOWN;
@@ -237,6 +252,7 @@ void World::LoadSky( const char* filename, const char* bin_name )
 		f.write( (char*)&skySize.x, sizeof( skySize.x ) );
 		f.write( (char*)&skySize.y, sizeof( skySize.y ) );
 		f.write( (char*)pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
+	#endif
 	}
 	// convert to float4
 	float4* pixel4 = new float4[skySize.x * skySize.y];
@@ -314,7 +330,7 @@ void World::Print( const char* text, const uint x, const uint y, const uint z, c
 
 // World::LoadSprite
 // ----------------------------------------------------------------------------
-uint World::LoadSprite( const char* voxFile )
+uint World::LoadSprite( const char* voxFile, bool palShift )
 {
 	// attempt to load the .vox file
 	FILE* file = fopen( voxFile, "rb" );
@@ -357,7 +373,10 @@ uint World::LoadSprite( const char* voxFile )
 		memset( &header, 0, sizeof( ChunkHeader ) );
 		fread( &header, 1, sizeof( ChunkHeader ), file );
 		if (feof( file ) || header.name[0] == 0) break; // assume end of file
-		else if (!strncmp( header.name, "PACK", 4 )) fread( &frameCount, 1, 4, file );
+		else if (!strncmp( header.name, "PACK", 4 ))
+		{
+			fread( &frameCount, 1, 4, file );
+		}
 		else if (!strncmp( header.name, "SIZE", 4 ))
 		{
 			if (!frame) frame = new SpriteFrame();
@@ -370,7 +389,7 @@ uint World::LoadSprite( const char* voxFile )
 			uint N;
 			int3 s = frame->size;
 			fread( &N, 1, 4, file );
-			frame->buffer = new unsigned char[s.x * s.y * s.z];
+			frame->buffer = (uchar*)_aligned_malloc( s.x * s.y * s.z, 64 ); // B&H'21
 			memset( frame->buffer, 0, s.x * s.y * s.z );
 			for (uint i = 0; i < N; i++)
 			{
@@ -395,24 +414,38 @@ uint World::LoadSprite( const char* voxFile )
 	fclose( file );
 	// finalize new sprite
 	int3 maxSize = make_int3( 0 );
+	const uint offset = palShift ? 1 : 0;
 	for (int i = 0; i < frameCount; i++)
 	{
 		SpriteFrame* frame = newSprite->frame[i];
-		for (int s = frame->size.x * frame->size.y * frame->size.z, i = 0; i < s; i++) if (frame->buffer[i])
+		std::vector<uchar4> drawList;
+		for (int i = 0, z = 0; z < frame->size.z; z++)
 		{
-			const uint c = palette[frame->buffer[i]];
-			const uint blue = ((c >> 16) & 255) >> 6, green = ((c >> 8) & 255) >> 5, red = (c & 255) >> 5;
-			frame->buffer[i] = (red << 5) + (green << 2) + blue;
+			for (int y = 0; y < frame->size.y; y++)
+			{
+				for (int x = 0; x < frame->size.x; x++, i++)
+				{
+					if (frame->buffer[i])
+					{
+						const uint c = palette[frame->buffer[i] - offset];
+						const uint blue = min( 3u, (((c >> 16) & 255) + 31) >> 6 );
+						const uint green = min( 7u, (((c >> 8) & 255) + 15) >> 5 );
+						const uint red = min( 7u, ((c & 255) + 15) >> 5 );
+						const uint p = (red << 5) + (green << 2) + blue;
+						const uchar v = (p == 0) ? (1 << 5) : p;
+						frame->buffer[i] = v;
+						drawList.push_back( make_uchar4( x, y, z, frame->buffer[i] ) );
+					}
+				}
+			}
 		}
 		maxSize.x = max( maxSize.x, frame->size.x );
 		maxSize.y = max( maxSize.y, frame->size.y );
 		maxSize.z = max( maxSize.z, frame->size.z );
+		frame->drawList = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
+		memcpy( frame->drawList, drawList.data(), drawList.size() * sizeof( uchar4 ) );
+		frame->drawListSize = (uint)drawList.size();
 	}
-	// create the backup frame for sprite movement
-	SpriteFrame* backupFrame = new SpriteFrame();
-	backupFrame->size = maxSize;
-	backupFrame->buffer = new uchar[maxSize.x * maxSize.y * maxSize.z];
-	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
 	// all done, return sprite index
 	return (uint)sprite.size() - 1;
@@ -422,16 +455,42 @@ uint World::LoadSprite( const char* voxFile )
 // ----------------------------------------------------------------------------
 uint World::CloneSprite( const uint idx )
 {
+	if (idx >= sprite.size()) return 0;
 	// clone frame data, wich contain pointers to shared frame data
 	Sprite* newSprite = new Sprite();
-	if (idx >= sprite.size()) return 0;
 	newSprite->frame = sprite[idx]->frame;
+	newSprite->hasShadow = sprite[idx]->hasShadow;
 	// clone backup frame, which will be unique per instance
-	SpriteFrame* backupFrame = new SpriteFrame();
-	backupFrame->size = sprite[idx]->backup->size;
-	backupFrame->buffer = new uchar[backupFrame->size.x * backupFrame->size.y * backupFrame->size.z];
-	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
+	return (uint)sprite.size() - 1;
+}
+
+// World::CreateSprite
+// ----------------------------------------------------------------------------
+uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
+{
+	// create a sprite from voxel information the world
+	Sprite* newSprite = new Sprite();
+	uint voxelsPerFrame = size.x * size.y * size.z;
+	for (int i = 0; i < frames; i++)
+	{
+		SpriteFrame* frame = new SpriteFrame();
+		frame->size = size;
+		std::vector<uchar4> drawList( voxelsPerFrame / 4 /* estimate */ );
+		frame->buffer = (uchar*)_aligned_malloc( voxelsPerFrame, 64 );
+		for (int x = 0; x < size.x; x++) for (int y = 0; y < size.y; y++) for (int z = 0; z < size.z; z++)
+		{
+			uint v = Get( i * size.x + x + pos.x, y + pos.y, z + pos.z );
+			frame->buffer[x + y * size.x + z * size.x * size.y] = v;
+			if (v != 0) drawList.push_back( make_uchar4( x, y, z, v ) );
+		}
+		frame->drawListSize = (uint)drawList.size();
+		frame->drawList = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
+		memcpy( frame->drawList, drawList.data(), drawList.size() * sizeof( uchar4 ) );
+		newSprite->frame.push_back( frame );
+	}
+	sprite.push_back( newSprite );
+	// all done, return sprite index
 	return (uint)sprite.size() - 1;
 }
 
@@ -445,39 +504,46 @@ uint World::SpriteFrameCount( const uint idx )
 	return (uint)sprite[idx]->frame.size();
 }
 
-// World::RemoveSprite (private; called from World::Commit)
-// ----------------------------------------------------------------------------
-void World::RemoveSprite( const uint idx )
-{
-	// restore pixels occupied by sprite at previous location
-	const int3 lastPos = sprite[idx]->lastPos;
-	if (lastPos.x == -9999) return;
-	const SpriteFrame* backup = sprite[idx]->backup;
-	const int3 s = backup->size;
-	for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
-		Set( lastPos.x + u, lastPos.y + v, lastPos.z + w, backup->buffer[i] );
-}
-
 // World::DrawSprite (private; called from World::Commit)
 // ----------------------------------------------------------------------------
 void World::DrawSprite( const uint idx )
 {
 	// draw sprite at new location
 	const int3& pos = sprite[idx]->currPos;
-	if (pos.x != -9999)
+	if (pos.x == -9999) return;
+	const SpriteFrame* frame = sprite[idx]->GetFrame();
+	//SpriteFrame* backup = sprite[idx]->backup;
+	for (uint i = 0; i < frame->drawListSize; i++)
 	{
-		const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
-		SpriteFrame* backup = sprite[idx]->backup;
-		const int3& s = backup->size = frame->size;
-		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
+		const uchar4& draw = frame->drawList[i];
+		Set( pos.x + draw.x, pos.y + draw.y, pos.z + draw.z, draw.w );
+	}
+}
+
+// World::DrawSpriteShadow
+// ----------------------------------------------------------------------------
+void World::DrawSpriteShadow( const uint idx )
+{
+	const int3& pos = sprite[idx]->currPos;
+	const int x0 = pos.x - 12, x1 = pos.x + 12;
+	const int z0 = pos.z - 12, z1 = pos.z + 12;
+	for (int z = z0; z < z1; z++) for (int x = x0; x < x1; x++)
+	{
+		// shadow outline
+		const int d2 = (z - pos.z) * (z - pos.z) * 3 + (x - pos.x) * (x - pos.x) * 2;
+		if (d2 >= 360) continue;
+		// shadow intensity
+		const int i = (d2 / 3) + 150 + 16 * ((x + z) & 1);
+		// find height
+		for (int v, y = pos.y; y >= 0; y--) if (v = Read( x, y, z ))
 		{
-			const uint voxel = frame->buffer[i];
-			backup->buffer[i] = Get( pos.x + u, pos.y + v, pos.z + w );
-			if (voxel != 0) Set( pos.x + u, pos.y + v, pos.z + w, voxel );
+			int r = (((v >> 5) & 7) * i) >> 8;
+			int g = (((v >> 2) & 7) * i) >> 8;
+			int b = ((v & 3) * i) >> 8;
+			Plot( x, y, z, max( 1, (r << 5) + (g << 2) + b ) );
+			break;
 		}
 	}
-	// store this location so we can remove the sprite later
-	sprite[idx]->lastPos = sprite[idx]->currPos;
 }
 
 // World::MoveSpriteTo
@@ -490,6 +556,14 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 	sprite[idx]->currPos = make_int3( x, y, z );
 }
 
+// World::RemoveSprite
+// ----------------------------------------------------------------------------
+void World::RemoveSprite( const uint idx )
+{
+	// move sprite to -9999 to keep it from taking CPU cycles
+	sprite[idx]->currPos.x = -9999;
+}
+
 // World::SetSpriteFrame
 // ----------------------------------------------------------------------------
 void World::SetSpriteFrame( const uint idx, const uint frame )
@@ -497,6 +571,67 @@ void World::SetSpriteFrame( const uint idx, const uint frame )
 	if (idx >= sprite.size()) return;
 	if (frame >= sprite[idx]->frame.size()) return;
 	sprite[idx]->currFrame = frame;
+}
+
+// World::SpriteHit
+// ----------------------------------------------------------------------------
+bool World::SpriteHit( const uint A, const uint B )
+{
+	// get the bounding boxes for the two sprites
+	int3 b1A = sprite[A]->currPos, b1B = sprite[B]->currPos;
+	if (b1A.x == -9999 || b1B.x == -9999) return false; // early out: at least one is inactive
+	SpriteFrame* frameA = sprite[A]->frame[sprite[A]->currFrame];
+	SpriteFrame* frameB = sprite[B]->frame[sprite[B]->currFrame];
+	int3 b2A = b1A + frameA->size, b2B = b1B + frameB->size;
+	// get the intersection of the bounds
+	int3 b1 = make_int3( max( b1A.x, b1B.x ), max( b1A.y, b1B.y ), max( b1A.z, b1B.z ) );
+	int3 b2 = make_int3( min( b2A.x, b2B.x ), min( b2A.y, b2B.y ), min( b2A.z, b2B.z ) );
+	if (b1.x > b2.x || b1.y > b2.y || b1.z > b2.z) return false;
+	// check individual voxels
+	int3 pA = b1 - b1A, pB = b1 - b1B;
+	int3 sizeA = frameA->size, sizeB = frameB->size, sizeI = b2 - b1;
+	uchar* dA = frameA->buffer + pA.x + pA.y * sizeA.x + pA.z * sizeA.x * sizeA.y;
+	uchar* dB = frameB->buffer + pB.x + pB.y * sizeB.x + pB.z * sizeB.x * sizeB.y;
+	for (int z = 0; z < sizeI.z; z++)
+	{
+		for (int y = 0; y < sizeI.y; y++)
+		{
+			for (int x = 0; x < sizeI.x; x++) if (dA[x] * dB[x]) return true;
+			dA += sizeA.x, dB += sizeB.x;
+		}
+		dA += sizeA.x * sizeA.y, dB += sizeB.x * sizeB.y;
+	}
+	return false;
+}
+
+// World::CreateParticles
+// ----------------------------------------------------------------------------
+uint World::CreateParticles( const uint count )
+{
+	Particles* p = new Particles( count );
+	particles.push_back( p );
+	return (uint)(particles.size() - 1);
+}
+
+// World::SetParticle
+// ----------------------------------------------------------------------------
+void World::SetParticle( const uint set, const uint idx, const uint3 pos, const uint v )
+{
+	particles[set]->voxel[idx] = make_uint4( pos, v );
+}
+
+// World::DrawParticles
+// ----------------------------------------------------------------------------
+void World::DrawParticles( const uint set )
+{
+	Particles* p = particles[set];
+	if (p->count == 0 || p->voxel[0].x == -9999) return; // inactive
+	for (uint i = 0; i < p->count; i++)
+	{
+		const uint4 v = p->voxel[i];
+		//p->backup[i] = make_uint4( v.x, v.y, v.z, Get( v.x, v.y, v.z ) );
+		Set( v.x, v.y, v.z, v.w );
+	}
 }
 
 // World::LoadTile
@@ -517,13 +652,9 @@ void World::DrawTile( const uint idx, const uint x, const uint y, const uint z )
 }
 void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes )
 {
-	const uint g = grid[cellIdx];
-	uint brickIdx;
-	if ((g & 1) == 1) brickIdx = g >> 1; else brickIdx = NewBrick(), grid[cellIdx] = (brickIdx << 1) | 1;
-	// copy tile data to brick
-	memcpy( brick + brickIdx * BRICKSIZE, voxels, BRICKSIZE );
-	Mark( brickIdx );
-	brickInfo[brickIdx].zeroes = zeroes;
+	memcpy( brick + cellIdx * BRICKSIZE, voxels, BRICKSIZE );
+	brickInfo[cellIdx].setZeroes( zeroes );
+	modified.Mark( cellIdx );
 }
 
 // World::DrawTiles
@@ -606,11 +737,15 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 	while (true)
 	{
 		// check main grid
-		const uint o = grid[pos.x / BRICKDIM + (pos.z / BRICKDIM) * GRIDWIDTH + (pos.y / BRICKDIM) * GRIDWIDTH * GRIDDEPTH];
-		if (o != 0) if ((o & 1) == 0) /* solid */
+		const uint cellIdx =
+			((pos.x / BRICKDIM - params.scroll.x) & (GRIDWIDTH - 1)) +
+			((pos.z / BRICKDIM - params.scroll.z) & (GRIDDEPTH - 1)) * GRIDWIDTH +
+			((pos.y / BRICKDIM - params.scroll.y) & (GRIDHEIGHT - 1)) * GRIDWIDTH * GRIDDEPTH;
+		const auto& info = brickInfo[cellIdx];
+		if (!info.isAir()) if (info.isSolid()) /* solid */
 		{
 			dist = t, N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
-			return o >> 1;
+			return cellIdx;
 		}
 		else // brick
 		{
@@ -624,7 +759,7 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 			float dmz = ((float)((p & 1023) + OFFS_Z) - A.z) * rV.z, d = t;
 			do
 			{
-				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+				const uint idx = cellIdx * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
 				const unsigned int color = brick[idx];
 				if (color != 0U)
 				{
@@ -645,111 +780,6 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 		if ((pos.x & (65536 - MAPWIDTH)) + (pos.y & (65536 - MAPWIDTH)) + (pos.z & (65536 - MAPWIDTH))) break;
 	}
 	return 0U;
-}
-
-static float packet_t[64];
-static uint packet_voxel[64];
-static float3 packet_N[64];
-
-// World::TracePacket
-// ----------------------------------------------------------------------------
-void World::TracePacket( float3 O, const float3 P1, const float3 P2, const float3 P3, const float3 P4 )
-{
-	// Ray Tracing Animated Scenes using Coherent Grid Traversal, Wald et al., 2006
-	// 0. Generate tile rays, TODO: postpone until actually needed?
-	float3 D[64], rD[64];
-	uint b[64];
-	for (int i = 0, y = 0; y < 8; y++) for (int x = 0; x < 8; x++, i++)
-	{
-		float3 P = P1 + (P2 - P1) * ((float)x / 7.0f) + (P4 - P1) * ((float)y / 7.0f);
-		D[i] = normalize( P - O );
-		rD[i] = make_float3( 1.0f / D[i].x, 1.0f / D[i].y, 1.0f / D[i].z );
-		packet_t[i] = 1e34f;
-		b[i] = SELECT( 4, 34, D[i].x > 0 ) + SELECT( 3072, 10752, D[i].y > 0 ) + SELECT( 1310720, 3276800, D[i].z > 0 ); // magic
-	}
-	// 1. Find dominant axis
-	const float3 D1 = normalize( P1 - O ), D2 = normalize( P2 - O ); // TODO: normalization not needed?
-	const float3 D3 = normalize( P3 - O ), D4 = normalize( P4 - O );
-	uint k = dominantAxis( D1 );
-	if (k == 0)
-	{
-		// x is major axis; u = y and v = z.
-		const float4 delta = make_float4(
-			min( min( D1.y, D2.y ), min( D3.y, D4.y ) ), max( max( D1.y, D2.y ), max( D3.y, D4.y ) ),
-			min( min( D1.z, D2.z ), min( D3.z, D4.z ) ), max( max( D1.z, D2.z ), max( D3.z, D4.z ) )
-		);
-		// start stepping
-		int w = (int)O.x / 8, dir = D1.x > 0 ? 1 : -1;
-		float4 frustum = make_float4( O.y, O.y, O.z, O.z );
-		while (1)
-		{
-			frustum += delta;
-			int4 uvcells = make_int4( frustum * (1.0f / BRICKDIM) );
-			uvcells.x = max( 0, uvcells.x );
-			uvcells.y = max( 0, uvcells.y );
-			uvcells.z = min( GRIDHEIGHT - 1, uvcells.z );
-			uvcells.w = min( GRIDDEPTH - 1, uvcells.w );
-			for (int v = uvcells.z; v <= uvcells.w; v++) for (int u = uvcells.x; u <= uvcells.y; u++)
-			{
-				const uint g = grid[w + v * GRIDWIDTH + u * GRIDWIDTH * GRIDDEPTH];
-				if (g)
-				{
-					for (int i = 0; i < 64; i++) if (packet_t[i] > 1e33f /* ray did not find a voxel yet */)
-					{
-						const uint bits = b[i];
-						const float tdx = (float)DIR_X * rD[i].x, tdy = (float)DIR_Y * rD[i].y, tdz = (float)DIR_Z * rD[i].z;
-						uint last = 0;
-						// TODO: we can probably just test three planes based on 'bits'?
-						const float tx1 = ((float)w * BRICKDIM - O.x) * rD[i].x, tx2 = (((float)w * BRICKDIM + BRICKDIM) - O.x) * rD[i].x;
-						float tmin = min( tx1, tx2 ), tmax = max( tx1, tx2 );
-						const float ty1 = ((float)u * BRICKDIM - O.y) * rD[i].y, ty2 = (((float)u * BRICKDIM + BRICKDIM) - O.y) * rD[i].y;
-						tmin = max( tmin, min( ty1, ty2 ) ), tmax = min( tmax, max( ty1, ty2 ) );
-						const float tz1 = ((float)v * BRICKDIM - O.z) * rD[i].z, tz2 = (((float)v * BRICKDIM + BRICKDIM) - O.z) * rD[i].z;
-						tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
-						if (tmax > tmin && tmax > 0 /* TODO: tmax > 0 superfluous? */)
-						{
-							float3 E = O + tmin * D[i]; // this is where the ray enters the voxel
-							if (g >> 1)
-							{
-								// solid supervoxel; finalize ray
-								packet_t[i] = tmin;
-								packet_N[i] = make_float3( 0, 1, 0 ); // TODO: determine actual normal
-								packet_voxel[i] = g >> 1;
-							}
-							else
-							{
-								// traverse brick
-								uint p = (clamp( (uint)E.x, (uint)w * BRICKDIM, (uint)w * BRICKDIM + BRICKDIM - 1 ) << 20) +
-									(clamp( (uint)E.y, (uint)u * BRICKDIM, (uint)u * BRICKDIM + BRICKDIM - 1 ) << 10) +
-									clamp( (uint)E.z, (uint)v * BRICKDIM, (uint)v * BRICKDIM + BRICKDIM - 1 );
-								const uint pn = p & TOPMASK3;
-								float dmx = ((float)((p >> 20) + OFFS_X) - O.x) * rD[i].x;
-								float dmy = ((float)(((p >> 10) & 1023) + OFFS_Y) - O.y) * rD[i].y;
-								float dmz = ((float)((p & 1023) + OFFS_Z) - O.z) * rD[i].z, d = tmin;
-								do
-								{
-									const uint idx = (g >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
-									const unsigned int c = brick[idx];
-									if (c != 0U)
-									{
-										packet_t[i] = d;
-										packet_N[i] = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
-										packet_voxel[i] = c;
-									}
-									d = min( dmx, min( dmy, dmz ) );
-									if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
-									if (d == dmy) dmy += tdy, p += DIR_Y << 10, last = 1;
-									if (d == dmz) dmz += tdz, p += DIR_Z, last = 2;
-								} while ((p & TOPMASK3) == pn);
-							}
-						}
-					}
-				}
-			}
-			w += dir;
-			if (w < 0 || w >= GRIDWIDTH) break;
-		}
-	}
 }
 
 /*
@@ -792,8 +822,7 @@ void World::Render()
 	params.R0 = RandomUInt();
 	static uint frame = 0;
 	params.frame = frame++;
-#if CPUONLY == 0
-	// default path: use GPU to render current world state in the background
+	// use GPU to render current world state in the background
 	if (copyInFlight)
 	{
 		// finalize the asynchronous copy by executing the commit kernel
@@ -807,164 +836,87 @@ void World::Render()
 	// get render parameters to GPU and invoke kernel asynchronously
 	paramBuffer->CopyToDevice( false );
 	renderer->Run( screen, make_int2( 32, 4 ) );
-#else
-	// CPU-only path
-	static Surface* target = 0;
-	if (!target) target = new Surface( SCRWIDTH, SCRHEIGHT );
-#if 0
-	// reference flow, single ray traversal - WARNING: SLOW
-#pragma omp parallel for schedule (dynamic)
-	for (int y = 0; y < SCRHEIGHT; y++)
-	{
-		float2 uv;
-		uv.y = (float)y / SCRHEIGHT;
-		for (int x = 0; x < SCRWIDTH; x++)
-		{
-			// create primary ray
-			uv.x = (float)x / SCRWIDTH;
-			const float3 P = params.p0 + (params.p1 - params.p0) * uv.x + (params.p2 - params.p0) * uv.y;
-			const float3 D = normalize( P - params.E );
-			// trace primary ray
-			float dist;
-			float3 N;
-			const uint voxel = TraceRay( make_float4( params.E, 1 ), make_float4( D, 1 ), dist, N, 999999 /* no cap needed */ );
-			// visualize result
-			float3 pixel;
-			if (voxel == 0) pixel = make_float3( 0.5f, 0.5f, 1.0f ); /* sky, for now */ else
-			{
-				const float3 BRDF1 = INVPI * make_float3( (float)(voxel >> 5) * (1 / 7.0f), (float)((voxel >> 2) & 7) * (1 / 7.0f), (float)(voxel & 3) * (1 / 3.0f) );
-				// hardcoded lights - image based lighting, no visibility test
-				pixel = BRDF1 * 2 * (
-					(N.x * N.x) * ((-N.x + 1) * make_float3( NX0 ) + (N.x + 1) * make_float3( NX1 )) +
-					(N.y * N.y) * ((-N.y + 1) * make_float3( NY0 ) + (N.y + 1) * make_float3( NY1 )) +
-					(N.z * N.z) * ((-N.z + 1) * make_float3( NZ0 ) + (N.z + 1) * make_float3( NZ1 ))
-				);
-			}
-			const int r = (int)(sqrtf( clamp( pixel.x, 0.0f, 1.0f ) ) * 255.0f);
-			const int g = (int)(sqrtf( clamp( pixel.y, 0.0f, 1.0f ) ) * 255.0f);
-			const int b = (int)(sqrtf( clamp( pixel.z, 0.0f, 1.0f ) ) * 255.0f);
-			target->buffer[x + y * SCRWIDTH] = r + (g << 8) + (b << 16);
-		}
-	}
-#else
-	// tile / packet renderer
-	for (int y = 0; y < SCRHEIGHT / 8; y++)
-	{
-		for (int x = 0; x < SCRWIDTH / 8; x++)
-		{
-			// create primary ray
-			const float2 uv0 = make_float2( (float)x / SCRHEIGHT, (float)y / SCRHEIGHT );
-			const float2 uv1 = make_float2( (float)(x + 7) / SCRHEIGHT, (float)(y + 7) / SCRHEIGHT );
-			const float3 P1 = params.p0 + (params.p1 - params.p0) * uv0.x + (params.p2 - params.p0) * uv0.y;
-			const float3 P2 = params.p0 + (params.p1 - params.p0) * uv1.x + (params.p2 - params.p0) * uv0.y;
-			const float3 P3 = params.p0 + (params.p1 - params.p0) * uv1.x + (params.p2 - params.p0) * uv1.y;
-			const float3 P4 = params.p0 + (params.p1 - params.p0) * uv0.x + (params.p2 - params.p0) * uv1.y;
-			TracePacket( params.E, P1, P2, P3, P4 );
-			// visualize result
-			for (int v = 0; v < 8; v++) for (int u = 0; u < 8; u++)
-			{
-				const uint voxel = packet_voxel[u + v * 8];
-				const float3 N = packet_N[u + v * 8];
-				// visualize result
-				float3 pixel;
-				if (voxel == 0) pixel = make_float3( 0.5f, 0.5f, 1.0f ); /* sky, for now */ else
-				{
-					const float3 BRDF1 = INVPI * make_float3( (float)(voxel >> 5) * (1 / 7.0f), (float)((voxel >> 2) & 7) * (1 / 7.0f), (float)(voxel & 3) * (1 / 3.0f) );
-					// hardcoded lights - image based lighting, no visibility test
-					pixel = BRDF1 * 2 * (
-						(N.x * N.x) * ((-N.x + 1) * make_float3( NX0 ) + (N.x + 1) * make_float3( NX1 )) +
-						(N.y * N.y) * ((-N.y + 1) * make_float3( NY0 ) + (N.y + 1) * make_float3( NY1 )) +
-						(N.z * N.z) * ((-N.z + 1) * make_float3( NZ0 ) + (N.z + 1) * make_float3( NZ1 ))
-					);
-				}
-				const int r = (int)(sqrtf( clamp( pixel.x, 0.0f, 1.0f ) ) * 255.0f);
-				const int g = (int)(sqrtf( clamp( pixel.y, 0.0f, 1.0f ) ) * 255.0f);
-				const int b = (int)(sqrtf( clamp( pixel.z, 0.0f, 1.0f ) ) * 255.0f);
-				target->buffer[x * 8 + u + (y * 8 + v) * SCRWIDTH] = r + (g << 8) + (b << 16);
-			}
-		}
-	}
-#endif
-	glBindTexture( GL_TEXTURE_2D, targetTextureID );
-	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, SCRWIDTH, SCRHEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, target->buffer );
-	glBindTexture( GL_TEXTURE_2D, 0 );
-	CheckGL();
-#endif
 }
 
 // World::Commit
 // ----------------------------------------------------------------------------
+void World::Draw()
+{
+	createBackup = true;
+	// add the sprites and particles to the world
+	for (int s = (int)sprite.size(), i = 0; i < s; i++)
+	{
+		if (sprite[i]->hasShadow) DrawSpriteShadow( i );
+		DrawSprite( i );
+	}
+	for (int s = (int)particles.size(), i = 0; i < s; i++) DrawParticles( i );
+	createBackup = false;
+}
+
 void World::Commit()
 {
-	// add the sprites the world
-	for (uint s = (uint)sprite.size(), i = 0; i < s; i++) DrawSprite( i );
 	// make sure the previous commit completed
 	if (commitInFlight) clWaitForEvents( 1, &commitDone );
-	// replace the initial commit buffer by a double-sized buffer in pinned memory
-	static uint* pinnedMemPtr = 0;
-	if (pinnedMemPtr == 0)
-	{
-		const uint pinnedSize = commitSize + gridSize;
-		cl_mem pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 2, 0, 0 );
-		pinnedMemPtr = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, pinnedSize, 0, 0, 0, 0 );
-		StreamCopy( (__m256i*)(pinnedMemPtr + commitSize / 4), (__m256i*)grid, gridSize );
-		grid = pinnedMemPtr + commitSize / 4; // top-level grid resides at the start of the commit buffer
-	}
 	// gather changed bricks
 	tasks = 0;
 	uint* brickIndices = pinnedMemPtr + gridSize / 4;
 	uchar* changedBricks = (uchar*)(brickIndices + MAXCOMMITS);
-	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j ) /* if not dirty: skip 32 bits at once */)
+	bool changed = firstFrame;
+	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (modified.IsDirty32( j ) /* if not dirty: skip 32 bits at once */)
 	{
+		changed = true;
 		for (uint k = 0; k < 32; k++)
 		{
 			const uint i = j * 32 + k;
-			if (!IsDirty( i )) continue;
+			if (!modified.IsDirty( i )) continue;
+			pinnedMemPtr[i] = brickInfo[i].getData();
+			if (brickInfo[i].isSolid()) continue;
 			*brickIndices++ = i; // store index of modified brick at start of commit buffer
 			StreamCopy( (__m256i*)changedBricks, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
 			changedBricks += BRICKSIZE, tasks++;
 		}
-		ClearMarks32( j );
+		modified.ClearMarks32( j );
 		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
 	}
-	// copy top-level grid to start of pinned buffer in preparation of final transfer
-	if (tasks > 0 || firstFrame) StreamCopyMT( (__m256i*)pinnedMemPtr, (__m256i*)grid, gridSize );
-	// asynchroneously copy the CPU data to the GPU via the commit buffer
-	if (tasks > 0 || firstFrame)
-	{
-		// enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
-		const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE);
-		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
-		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
-		size_t origin[3] = { 0, 0, 0 };
-		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
-		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
-		copyInFlight = true;	// next render should wait for this commit to complete
-		firstFrame = false;		// next frame is not the first frame
-	}
-	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites
-	for (uint s = (uint)sprite.size(), i = 0; i < s; i++) RemoveSprite( i );
+	// if there is no data to send, then we are done.
+	if (!changed) return;
+	// copy top-level grid: enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
+	const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE);
+	clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
+	// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
+	size_t origin[3] = { 0, 0, 0 };
+	size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
+	clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
+	copyInFlight = true;	// next render should wait for this commit to complete
+	firstFrame = false;		// next frame is not the first frame
 }
 
-// World::CheckBrick
-// ----------------------------------------------------------------------------
-void World::CheckBrick( const uint idx )
+void World::Erase()
 {
-	int zeroCount = 0;
-	for (int q = 0; q < BRICKSIZE; q++) if (brick[idx * BRICKSIZE + q] == 0) zeroCount++;
-	if (zeroCount != brickInfo[idx].zeroes)
+	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites and particles
+	// NOTE: this must explicitly happen in reverse order.
+	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (modifiedBackup.IsDirty32( j ) /* if not dirty: skip 32 bits at once */)
 	{
-		for (int i = 0; i < GRIDSIZE; i++) if (grid[i] == ((idx << 1) | 1))
+		for (uint k = 0; k < 32; k++)
 		{
-			int w = 0;
-			FatalError( "Bad brick!" );
+			const uint i = j * 32 + k;
+			if (!modifiedBackup.IsDirty( i )) continue;
+			const auto& backupInfo = brickInfoBackup[i];
+			brickInfo[i] = brickInfoBackup[i];
+			modified.Mark( i );
+			if (!backupInfo.isSolid()) // Solid backup
+			{
+				const uint offset = i * BRICKSIZE;
+				StreamCopy( (__m256i*)(brick + offset), (__m256i*)(brickBackup + offset), BRICKSIZE );
+			}
 		}
+		modifiedBackup.ClearMarks32( j );
 	}
 }
 
 // World::StreamCopyMT
 // ----------------------------------------------------------------------------
-#define COPYTHREADS	4
+#define COPYTHREADS	8
 void World::StreamCopyMT( __m256i* dst, __m256i* src, const uint bytes )
 {
 	// fast copying of large 32-byte aligned / multiple of 32 sized data blocks:

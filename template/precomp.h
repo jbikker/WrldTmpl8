@@ -11,6 +11,7 @@
 #include <chrono>
 #include <fstream>
 #include <vector>
+#include <list>
 #include <string>
 #include <thread>
 #include <math.h>
@@ -47,9 +48,6 @@ using namespace std;
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
-
-// tool includes
-#include <FreeImage.h>			// image loading. http://freeimage.sourceforge.net
 
 // namespaces
 namespace Tmpl8 { class World; };
@@ -331,6 +329,12 @@ inline float3 operator-( float3& a ) { return make_float3( -a.x, -a.y, -a.z ); }
 inline int3 operator-( int3& a ) { return make_int3( -a.x, -a.y, -a.z ); }
 inline float4 operator-( float4& a ) { return make_float4( -a.x, -a.y, -a.z, -a.w ); }
 inline int4 operator-( int4& a ) { return make_int4( -a.x, -a.y, -a.z, -a.w ); }
+inline int2 operator << ( int2& a, int b ) { return make_int2( a.x << b, a.y << b ); }
+inline int2 operator >> ( int2& a, int b ) { return make_int2( a.x >> b, a.y >> b ); }
+inline int3 operator << ( int3& a, int b ) { return make_int3( a.x << b, a.y << b, a.z << b ); }
+inline int3 operator >> ( int3& a, int b ) { return make_int3( a.x >> b, a.y >> b, a.z >> b ); }
+inline int4 operator << ( int4& a, int b ) { return make_int4( a.x << b, a.y << b, a.z << b, a.w << b ); }
+inline int4 operator >> ( int4& a, int b ) { return make_int4( a.x >> b, a.y >> b, a.z >> b, a.w >> b ); }
 
 inline float2 operator+( float2 a, float2 b ) { return make_float2( a.x + b.x, a.y + b.y ); }
 inline float2 operator+( float2 a, int2 b ) { return make_float2( a.x + (float)b.x, a.y + (float)b.y ); }
@@ -1050,7 +1054,7 @@ public:
 	void Clear();
 	// data members
 	unsigned int* hostBuffer;
-	cl_mem deviceBuffer, pinnedBuffer;
+	cl_mem deviceBuffer = 0;
 	unsigned int type, size, textureID;
 	bool ownData;
 };
@@ -1085,6 +1089,7 @@ public:
 	void SetArgument( int idx, float3 );
 	void SetArgument( int idx, float4 );
 	static bool InitCL();
+	static void KillCL();
 private:
 	// data members
 	cl_kernel kernel;

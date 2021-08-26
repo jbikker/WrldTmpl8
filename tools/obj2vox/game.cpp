@@ -1,6 +1,8 @@
 #include "precomp.h"
 
-// #define CONSERVATIVE
+#define CONSERVATIVE
+// #define EMIT_ROTATION
+#define ANIM_FRAMES	32
 
 #include "scene.h"
 
@@ -9,11 +11,8 @@ Scene scene;
 float3 bmin, bmax, offset;
 float scale;
 
-#define VOXELSX		127
-#define VOXELSY		127
-#define VOXELSZ		127
-
 unsigned int* dat = 0;
+unsigned int* dats = 0;
 float xl[256], xr[256], zl[256], zr[256];
 float ul[256], ur[256], vl[256], vr[256];
 
@@ -165,7 +164,7 @@ void Voxelize()
 // -----------------------------------------------------------
 // Store voxel data
 // -----------------------------------------------------------
-void Save()
+void SaveFrames( int frames )
 {
 	char fname[1024];
 	strcpy( fname, scene.path );
@@ -178,44 +177,55 @@ void Save()
 	fwrite( chunkID, 4, 1, f );
 	fwrite( &version, 4, 1, f );
 	// main chunk
-	int voxelCount = 0;
-	for( int i = 0; i < (maxSize * maxSize * maxSize); i++ ) if (dat[i]) voxelCount++;
 	strcpy( chunkID, "MAIN" );
 	fwrite( chunkID, 4, 1, f );
 	fwrite( &zero, 4, 1, f );
-	int totalSize = voxelCount * 4 + 1076;
+	int totalSize = 0x7fffff; // it doesn't care in practice
 	fwrite( &totalSize, 4, 1, f );
-	// size chunk
-	strcpy( chunkID, "SIZE" );
+	// pack chunk
+	strcpy( chunkID, "PACK" );
 	fwrite( chunkID, 4, 1, f );
-	int chunkSize = 12, childChunks = 0;
-	fwrite( &chunkSize, 4, 1, f );
-	fwrite( &childChunks, 4, 1, f );
-	int sizex = maxSize, sizey = maxSize, sizez = maxSize;
-	fwrite( &sizex, 4, 1, f );
-	fwrite( &sizey, 4, 1, f );
-	fwrite( &sizez, 4, 1, f );
-	// voxel data
-	strcpy( chunkID, "XYZI" );
-	fwrite( chunkID, 4, 1, f );
-	chunkSize = voxelCount * 4 + 4;
-	fwrite( &chunkSize, 4, 1, f );
-	fwrite( &childChunks, 4, 1, f );
-	fwrite( &voxelCount, 4, 1, f );
-	for( int z = 0; z < maxSize; z++ ) for( int y = 0; y < maxSize; y++ ) for( int x = 0; x < maxSize; x++ )
+	int cs = 4, dummy = 0;
+	fwrite( &cs, 1, 4, f );
+	fwrite( &dummy, 1, 4, f );
+	fwrite( &frames, 1, 4, f );
+	// export frame(s)
+	for( int j = 0; j < frames; j++ )
 	{
-		int idx = x + y * maxSize + z * maxSize * maxSize;
-		if (dat[idx])
+		// size chunk
+		strcpy( chunkID, "SIZE" );
+		fwrite( chunkID, 4, 1, f );
+		int chunkSize = 12, childChunks = 0;
+		fwrite( &chunkSize, 4, 1, f );
+		fwrite( &childChunks, 4, 1, f );
+		int sizex = maxSize, sizey = maxSize, sizez = maxSize;
+		fwrite( &sizex, 4, 1, f );
+		fwrite( &sizey, 4, 1, f );
+		fwrite( &sizez, 4, 1, f );
+		// voxel data
+		strcpy( chunkID, "XYZI" );
+		fwrite( chunkID, 4, 1, f );
+		int voxelCount = 0;
+		for( int i = 0; i < (maxSize * maxSize * maxSize); i++ ) if (dats[i + j * maxSize * maxSize * maxSize]) voxelCount++;
+		chunkSize = voxelCount * 4 + 4;
+		fwrite( &chunkSize, 4, 1, f );
+		fwrite( &childChunks, 4, 1, f );
+		fwrite( &voxelCount, 4, 1, f );
+		for( int z = 0; z < maxSize; z++ ) for( int y = 0; y < maxSize; y++ ) for( int x = 0; x < maxSize; x++ )
 		{
-			unsigned int pal = GetPaletteIdx( dat[idx] );
-			unsigned int voxel = ((pal + 1) << 24) + ((maxSize - 1 - z) << 8) + (y << 16) + x;
-			fwrite( &voxel, 4, 1, f );
+			int idx = x + y * maxSize + z * maxSize * maxSize;
+			if (dats[idx + j * maxSize * maxSize * maxSize])
+			{
+				unsigned int pal = GetPaletteIdx( dats[idx + j * maxSize * maxSize * maxSize] );
+				unsigned int voxel = ((pal + 1) << 24) + ((maxSize - 1 - z) << 8) + (y << 16) + x;
+				fwrite( &voxel, 4, 1, f );
+			}
 		}
 	}
 	// palette
 	strcpy( chunkID, "RGBA" );
 	fwrite( chunkID, 4, 1, f );
-	chunkSize = 1024;
+	int chunkSize = 1024, childChunks = 0;
 	fwrite( &chunkSize, 4, 1, f );
 	fwrite( &childChunks, 4, 1, f );
 	fwrite( palette, 256, 4, f );
@@ -231,9 +241,13 @@ void Game::Init()
 	if (fileName) scene.InitScene( fileName ); else 
 	{
 		// scene.InitScene( "data/toad/toad.obj" );
-		scene.InitScene( "data/lego/legocar.obj" );
+		// scene.InitScene( "data/lego/legocar.obj" );
+		// scene.InitScene( "data/ship/yet.obj" );
+		// scene.InitScene( "data/pillar/pillar.obj" );
+		scene.InitScene( "data/mother/mother.obj" );
 	}
 	dat = new unsigned int[maxSize * maxSize * maxSize];
+	dats = new unsigned int[maxSize * maxSize * maxSize * ANIM_FRAMES];
 	memset( dat, 0, maxSize * maxSize * maxSize * 4 );
 	memset( palette, 0, 1024 );
 }
@@ -245,12 +259,75 @@ void Game::Tick( float _DT )
 {
 	// prepare voxelization
 	bmin = scene.GetExtends().bmin,	bmax = scene.GetExtends().bmax;
+#ifdef EMIT_ROTATION
+	// compute bounds under rotation around object pivot (i.e., origin in object space)
+	float3 p[8] = { 
+		make_float3( bmin.x, bmin.y, bmin.z ), make_float3( bmax.x, bmin.y, bmin.z ),
+		make_float3( bmax.x, bmax.y, bmin.z ), make_float3( bmin.x, bmax.y, bmin.z ),
+		make_float3( bmin.x, bmin.y, bmax.z ), make_float3( bmax.x, bmin.y, bmax.z ),
+		make_float3( bmax.x, bmax.y, bmax.z ), make_float3( bmin.x, bmax.y, bmax.z )
+	};
+	bmin = make_float3( 1e34f ), bmax = make_float3( -1e34f );
+	for( int i = 0; i < ANIM_FRAMES; i++ )
+	{
+		float angle = (2 * PI * i) / ANIM_FRAMES;
+		mat4 M = mat4::RotateZ( angle );
+		for( int j = 0; j < 8; j++ )
+		{
+			float3 q = make_float3( make_float4( p[j], 1 ) * M );
+			bmin.x = min( bmin.x, q.x );
+			bmin.y = min( bmin.y, q.y );
+			bmin.z = min( bmin.z, q.z );
+			bmax.x = max( bmax.x, q.x );
+			bmax.y = max( bmax.y, q.y );
+			bmax.z = max( bmax.z, q.z );
+		}
+	}
+#endif
+	// scale mesh to bounds
 	offset = -bmin;
 	float3 size = bmax - bmin;
 	scale = min( min( maxSize / size.x, maxSize / size.y ), maxSize / size.z );
 	offset.x += ((maxSize - (scale * size.x)) * 0.5f) / scale;
 	offset.y += ((maxSize - (scale * size.y)) * 0.5f) / scale;
 	offset.z += ((maxSize - (scale * size.z)) * 0.5f) / scale;
+#ifdef EMIT_ROTATION
+	// transform & prescale
+	for( unsigned int i = 0; i < scene.m_Primitives; i++ ) 
+	{
+		for( int v = 0; v < 3; v++ )
+			scene.m_Prim[i].m_Vertex[v]->m_Orig = scene.m_Prim[i].m_Vertex[v]->m_Pos,
+			scene.m_Prim[i].m_Vertex[v]->m_NO = scene.m_Prim[i].m_Vertex[v]->m_N;
+		scene.m_Prim[i].m_NO = scene.m_Prim[i].m_N;
+	}
+	for( int i = 0; i < ANIM_FRAMES; i++ )
+	{
+		float angle = (2 * PI * i) / ANIM_FRAMES;
+		mat4 M = mat4::RotateY( angle );
+		for( unsigned int i = 0; i < scene.m_Primitives; i++ ) 
+		{
+			for( int v = 0; v < 3; v++ )
+			{
+				float3& no = scene.m_Prim[i].m_Vertex[v]->m_NO;
+				float3& n = scene.m_Prim[i].m_Vertex[v]->m_N;
+				float3& o = scene.m_Prim[i].m_Vertex[v]->m_Orig;
+				float3& p = scene.m_Prim[i].m_Vertex[v]->m_Pos;
+				p = (make_float3( make_float4( o, 1 ) * M ) + offset) * scale;
+				n = make_float3( make_float4( no, 0 ) * M );
+			}
+			scene.m_Prim[i].m_N = make_float3( make_float4( scene.m_Prim[i].m_NO, 0 ) * M );
+		}
+		// voxelize one frame
+		memset( dat, 0, maxSize * maxSize * maxSize * 4 );
+		printf( "voxelizing frame %i...\n", i );
+		Voxelize();
+		// store the frame
+		memcpy( dats + i * maxSize * maxSize * maxSize, dat, maxSize * maxSize * maxSize * 4 );
+	}
+	printf( "saving frames...\n" );
+	SaveFrames( ANIM_FRAMES );
+	printf( "all done.\n" );
+#else
 	// prescale
 	for( unsigned int i = 0; i < scene.m_Primitives; i++ ) for( int v = 0; v < 3; v++ )
 	{
@@ -261,7 +338,9 @@ void Game::Tick( float _DT )
 	scene.m_Extends.bmax = (scene.m_Extends.bmax + offset) * scale;
 	// voxelize
 	Voxelize();
-	Save();
+	memcpy( dats, dat, maxSize * maxSize * maxSize * 4 );
+	SaveFrames( 1 );
+#endif
 	exit( 0 );
 }
 

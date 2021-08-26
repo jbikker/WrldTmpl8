@@ -68,8 +68,8 @@ public:
 	const float GetV() const { return m_V; }
 	void SetUV( float a_U, float a_V ) { m_U = a_U; m_V = a_V; }
 	// member data
-	float3 m_N;		
-	float3 m_Pos;		
+	float3 m_N, m_NO;		
+	float3 m_Pos, m_Orig;		
 	float m_U, m_V;		
 };
 
@@ -88,7 +88,7 @@ public:
 	void SetVertex( const uint a_Idx, Vertex* a_Vertex ) { m_Vertex[a_Idx] = a_Vertex; }
 	const float3 GetNormal( float u, float v ) const { return m_N; }
 	// data members
-	float3 m_N;				
+	float3 m_N, m_NO;				
 	Vertex* m_Vertex[3];		
 	Material* m_Material;		
 };

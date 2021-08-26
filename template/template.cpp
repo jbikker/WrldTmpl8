@@ -3,6 +3,9 @@
 
 #include "precomp.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "lib/stb_image.h"
+
 #pragma comment( linker, "/subsystem:windows /ENTRY:mainCRTStartup" )
 
 using namespace Tmpl8;
@@ -49,12 +52,20 @@ void Sphere( const float3 pos, const float r, const uint c )
 {
 	world->Sphere( pos.x, pos.y, pos.z, r, c );
 }
+void Box(  const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint c )
+{
+	for( int y = y1; y < y2; y++ ) for( int z = z1; z < z2; z++ ) for( int x = x1; x < x2; x++ ) Plot( x, y, z, c );
+}
+void Box( const int3 pos1, const int3 pos2, const uint c )
+{
+	Box( pos1.x, pos1.y, pos1.z, pos2.x, pos2.y, pos2.z, c );
+}
 void Copy( const int3 s1, const int3 s2, const int3 D )
 {
 	const int3 e = s2 - s1;
-	for( int z = 0; z <= e.z; z++ )
-		for( int y = 0; y <= e.y; y++ )
-			for( int x = 0; x <= e.x; x++ )
+	for (int z = 0; z <= e.z; z++)
+		for (int y = 0; y <= e.y; y++)
+			for (int x = 0; x <= e.x; x++)
 				Plot( D + make_int3( x, y, z ), Read( s1 + make_int3( x, y, z ) ) );
 }
 void Copy( const int3 s1, const int3 s2, const int x, const int y, const int z )
@@ -80,21 +91,61 @@ void HDisc( const float3 pos, const float r, const uint c )
 void Print( const char* text, const uint x, const uint y, const uint z, const uint c )
 {
 	world->Print( text, x, y, z, c );
-}	
+}
 void Print( const char* text, const uint3 pos, const uint c )
 {
 	world->Print( text, pos.x, pos.y, pos.z, c );
-}	
+}
 void Print( const char* text, const int3 pos, const uint c )
 {
 	world->Print( text, pos.x, pos.y, pos.z, c );
-}	
-uint LoadSprite( const char* voxFile ) { return world->LoadSprite( voxFile ); }
+}
+uint LoadSprite( const char* voxFile, bool palShift ) { return world->LoadSprite( voxFile, palShift ); }
+uint CreateSprite( const int3 pos, const int3 size, const int frames )
+{
+	return world->CreateSprite( pos, size, frames );
+}
+uint CreateSprite( const int x, const int y, const int z, const int w, const int h, const int d, const int frames )
+{
+	return CreateSprite( make_int3( x, y, z ), make_int3( w, h, d ), frames );
+}
+int3 GetSpriteFrameSize( const uint idx ) { return world->sprite[idx]->frame[world->sprite[idx]->currFrame]->size; }
+uint GetSpriteVoxel( const uint idx, const int3 pos )
+{
+	SpriteFrame* f = world->sprite[idx]->frame[world->sprite[idx]->currFrame];
+	const int3 s = f->size;
+	return f->buffer[pos.x + pos.y * s.x + pos.z * s.x * s.y];
+}
+uint GetSpriteVoxel( const uint idx, const uint3 pos )
+{
+	return GetSpriteVoxel( idx, make_int3( pos ) );
+}
+uint GetSpriteVoxel( const uint idx, const uint x, const uint y, const uint z )
+{
+	return GetSpriteVoxel( idx, make_int3( x, y, z ) );
+}
 uint CloneSprite( const uint idx ) { return world->CloneSprite( idx ); }
-void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->MoveSpriteTo( idx, x, y, z ); }
+uint CreateParticles( const uint count ) { return world->CreateParticles( count ); }
+void SetParticle( const uint set, const uint idx, const int3 pos, const uint v )
+{
+	world->SetParticle( set, idx, make_uint3( pos ), v );
+}
+void SetParticle( const uint set, const uint idx, const uint3 pos, const uint v )
+{
+	world->SetParticle( set, idx, pos, v );
+}
+void SetParticle( const uint set, const uint idx, const uint x, const uint y, const uint z, const uint v )
+{
+	world->SetParticle( set, idx, make_uint3( x, y, z ), v );
+}
+void EnableShadow( const uint idx ) { world->sprite[idx]->hasShadow = true; }
+void DisableShadow( const uint idx ) { world->sprite[idx]->hasShadow = false; }
 void SetSpriteFrame( const uint idx, const uint frame ) { world->SetSpriteFrame( idx, frame ); }
+bool SpriteHit( const uint A, const uint B ) { return world->SpriteHit( A, B ); }
+void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->MoveSpriteTo( idx, x, y, z ); }
 void MoveSpriteTo( const uint idx, const int3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 void MoveSpriteTo( const uint idx, const uint3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
+void RemoveSprite( const uint idx ) { world->RemoveSprite( idx ); }
 uint LoadTile( const char* voxFile ) { return world->LoadTile( voxFile ); }
 uint LoadBigTile( const char* voxFile ) { return world->LoadBigTile( voxFile ); }
 void DrawTile( const uint idx, const uint x, const uint y, const uint z ) { world->DrawTile( idx, x, y, z ); }
@@ -117,7 +168,7 @@ void XLine( const uint x, const uint y, const uint z, int l, const uint c )
 {
 	uint u = x;
 	if (l < 0) l = -l, u -= l;
-	for( int i = 0; i < l; i++ ) world->Set( u + i, y, z, c );
+	for (int i = 0; i < l; i++) world->Set( u + i, y, z, c );
 }
 void XLine( const uint3 pos, int l, const uint c ) { XLine( pos.x, pos.y, pos.z, l, c ); }
 void XLine( const int3 pos, int l, const uint c ) { XLine( pos.x, pos.y, pos.z, l, c ); }
@@ -125,7 +176,7 @@ void YLine( const uint x, const uint y, const uint z, int l, const uint c )
 {
 	uint v = y;
 	if (l < 0) l = -l, v -= l;
-	for( int i = 0; i < l; i++ ) world->Set( x, v + i, z, c );
+	for (int i = 0; i < l; i++) world->Set( x, v + i, z, c );
 }
 void YLine( const uint3 pos, int l, const uint c ) { YLine( pos.x, pos.y, pos.z, l, c ); }
 void YLine( const int3 pos, int l, const uint c ) { YLine( pos.x, pos.y, pos.z, l, c ); }
@@ -133,14 +184,14 @@ void ZLine( const uint x, const uint y, const uint z, int l, const uint c )
 {
 	uint w = z;
 	if (l < 0) l = -l, w -= l;
-	for( int i = 0; i < l; i++ ) world->Set( x, y, w + i, c );
+	for (int i = 0; i < l; i++) world->Set( x, y, w + i, c );
 }
 void ZLine( const uint3 pos, int l, const uint c ) { ZLine( pos.x, pos.y, pos.z, l, c ); }
 void ZLine( const int3 pos, int l, const uint c ) { ZLine( pos.x, pos.y, pos.z, l, c ); }
 bool IsOccluded( const float3 P1, const float3 P2 )
 {
 	float dist, len = length( P2 - P1 ) - 0.002f;
-	float3 dummy, D = (P2 - P1 ) * (1.0f / len); // normalize without recalculating square root
+	float3 dummy, D = (P2 - P1) * (1.0f / len); // normalize without recalculating square root
 	world->TraceRay( make_float4( P1 + 0.001f * D, 1 ), make_float4( D, 1 ), dist, dummy, 999999 );
 	return dist < len;
 }
@@ -235,30 +286,40 @@ void main()
 		"#version 330\nuniform sampler2D c;in vec2 u;out vec4 f;void main(){f=sqrt(texture(c,u));}", true );
 	world = new World( renderTarget->ID );
 	game->Init();
+	// after init, sync all bricks to GPU
+	world->ForceSyncAllBricks();
 	// done, enter main loop
 	float deltaTime = 0;
 	while (!glfwWindowShouldClose( window ))
 	{
 		static Timer timer;
 		deltaTime = min( 500.0f, 1000.0f * timer.elapsed() );
-		// printf( "%f6.3f\n", deltaTime );
 		timer.reset();
 		world->Render();
 		game->Tick( deltaTime );
+		if (GetAsyncKeyState( VK_LSHIFT )) for( int i = 0; i < 3; i++ ) game->Tick( deltaTime );
+		world->Draw();
 		world->Commit();
+		world->Erase();
 	#ifdef USE_CPU_DEVICE
 		// copy the destination buffer to the renderTarget texture
 		// TODO
 	#endif
-		shader->Bind();
-		shader->SetInputTexture( 0, "c", renderTarget );
-		DrawQuad();
-		shader->Unbind();
-		glfwSwapBuffers( window );
-		glfwPollEvents();
+		static int frameNr = 0;
+		if (frameNr++ > 1)
+		{
+			shader->Bind();
+			shader->SetInputTexture( 0, "c", renderTarget );
+			DrawQuad();
+			shader->Unbind();
+			glfwSwapBuffers( window );
+			glfwPollEvents();
+		}
 		if (!running) break;
 	}
 	// close down
+	delete world;
+	Kernel::KillCL();
 	glfwDestroyWindow( window );
 	glfwTerminate();
 }
@@ -714,7 +775,7 @@ float noise2D( const float x, const float y )
 	return total / frequency;
 }
 
-// Math implementations
+// math implementations
 mat4 operator*( const mat4& a, const mat4& b )
 {
 	mat4 r;
@@ -1106,7 +1167,9 @@ Kernel::Kernel( cl_program& existingProgram, char* entryPoint )
 Kernel::~Kernel()
 {
 	if (kernel) clReleaseKernel( kernel );
-	if (program) clReleaseProgram( program );
+	// if (program) clReleaseProgram( program ); // NOTE: may be shared with other kernels
+	kernel = 0;
+	// program = 0;
 }
 
 // InitCL method
@@ -1173,6 +1236,26 @@ bool Kernel::InitCL()
 	// cleanup
 	delete devices;
 	return true;
+}
+
+// InitCL method
+// ----------------------------------------------------------------------------
+void Kernel::KillCL()
+{
+	cl_int error;
+	if (!CHECKCL( error = clReleaseCommandQueue( queue2 ) ))
+	{
+		int w = 0;
+	}
+	if (!CHECKCL( error = clReleaseCommandQueue( queue ) ))
+	{
+		int w = 0;
+	}
+	if (!CHECKCL( error = clReleaseContext( context ) ))
+	{
+		int w = 0;
+	}
+	int w = 0;
 }
 
 // SetArgument methods
@@ -1263,21 +1346,15 @@ Surface::Surface( const char* file ) : buffer( 0 ), width( 0 ), height( 0 )
 
 void Surface::LoadImage( const char* file )
 {
-	FREE_IMAGE_FORMAT fif = FIF_UNKNOWN;
-	fif = FreeImage_GetFileType( file, 0 );
-	if (fif == FIF_UNKNOWN) fif = FreeImage_GetFIFFromFilename( file );
-	FIBITMAP* tmp = FreeImage_Load( fif, file );
-	FIBITMAP* dib = FreeImage_ConvertTo32Bits( tmp );
-	FreeImage_Unload( tmp );
-	width = FreeImage_GetWidth( dib );
-	height = FreeImage_GetHeight( dib );
-	buffer = (uint*)MALLOC64( width * height * sizeof( uint ) );
-	for (int y = 0; y < height; y++)
+	int n;
+	unsigned char* data = stbi_load( file, &width, &height, &n, 0 );
+	if (data)
 	{
-		unsigned const char* line = FreeImage_GetScanLine( dib, height - 1 - y );
-		memcpy( buffer + y * width, line, width * sizeof( uint ) );
+		buffer = (uint*)MALLOC64( width * height * sizeof( uint ) );
+		const int s = width * height;
+		for (int i = 0; i < s; i++) buffer[i] = (data[i * n + 0] << 16) + (data[i * n + 1] << 8) + data[i * n + 2];
 	}
-	FreeImage_Unload( dib );
+	stbi_image_free( data );
 }
 
 Surface::~Surface()
