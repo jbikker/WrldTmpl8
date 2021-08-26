@@ -260,7 +260,7 @@ void main()
 	glfwSetCharCallback( window, CharEventCallback );
 	// initialize GLAD
 	if (!gladLoadGLLoader( (GLADloadproc)glfwGetProcAddress )) FatalError( "gladLoadGLLoader failed." );
-	glfwSwapInterval( 0 );
+	glfwSwapInterval( 1 );
 	// prepare OpenGL state
 	glDisable( GL_DEPTH_TEST );
 	glDisable( GL_CULL_FACE );
