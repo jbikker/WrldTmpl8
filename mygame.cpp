@@ -20,6 +20,6 @@ void MyGame::Tick( float deltaTime )
 {
 	// This function gets called once per frame by the template code.
 	World* world = GetWorld();
-	world->Print( "Hello World!", 280, 128, 512, 1 );
-	world->SetCameraMatrix( mat4::LookAt( make_float3( 280, 128, 50 ), make_float3( 320, 128, 512 ) ) );
+	Print( "Hello World!", 280, 128, 512, 1 );
+	LookAt( make_float3( 280, 128, 50 ), make_float3( 320, 128, 512 ) );
 }
