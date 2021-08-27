@@ -19,7 +19,6 @@ void MyGame::Init()
 void MyGame::Tick( float deltaTime )
 {
 	// This function gets called once per frame by the template code.
-	World* world = GetWorld();
 	Print( "Hello World!", 280, 128, 512, 1 );
 	LookAt( make_float3( 280, 128, 50 ), make_float3( 320, 128, 512 ) );
 }
