@@ -18,8 +18,6 @@ public:
 	void KeyDown( int key ) { /* implement if you want to handle keys */ }
 	// data members
 	int2 mousePos;
-	float3 ballPos = make_float3( 300, 100, 300 );
-	float3 ballVel = make_float3( 0.3f, 0, 0.5f );
 };
 
 } // namespace Tmpl8

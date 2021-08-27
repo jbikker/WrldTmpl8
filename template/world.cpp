@@ -56,10 +56,6 @@ World::World( const uint targetID )
 	brickInfoBackup = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
 	// Clear the backup bitarray
 	modifiedBackup.ClearMarks();
-	// prepare a test world
-	DummyWorld();
-	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz" );
-	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
 	printf( "Allocated %iMB on CPU and GPU for %ik bricks.\n", (int)((BRICKCOUNT * BRICKSIZE) >> 20), (int)(BRICKCOUNT >> 10) );
@@ -78,7 +74,6 @@ World::World( const uint targetID )
 	renderer->SetArgument( 4, brickBuffer[1] );
 	renderer->SetArgument( 5, brickBuffer[2] );
 	renderer->SetArgument( 6, brickBuffer[3] );
-	renderer->SetArgument( 7, sky );
 	committer->SetArgument( 1, &devmem );
 	committer->SetArgument( 2, brickBuffer[0] );
 	committer->SetArgument( 3, brickBuffer[1] );
@@ -102,6 +97,11 @@ World::World( const uint targetID )
 	targetTextureID = targetID;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
+	// prepare a test world
+	DummyWorld();
+	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz" );
+	renderer->SetArgument( 7, sky );
+	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
 }
 
 // World Destructor
@@ -848,7 +848,8 @@ void World::Render()
 	}
 	// get render parameters to GPU and invoke kernel asynchronously
 	paramBuffer->CopyToDevice( false );
-	renderer->Run( screen, make_int2( 32, 4 ) );
+	static int startDelay = 10;
+	if (startDelay == 0) renderer->Run( screen, make_int2( 32, 4 ) ); else startDelay--;
 }
 
 // World::Commit
