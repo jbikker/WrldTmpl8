@@ -170,6 +170,20 @@ void XLine( const uint x, const uint y, const uint z, int l, const uint c )
 	if (l < 0) l = -l, u -= l;
 	for (int i = 0; i < l; i++) world->Set( u + i, y, z, c );
 }
+void Line( const uint x1, const uint y1, const uint z1, const uint x2, const uint y2, const uint z2, const uint c )
+{
+	int dx = abs( (int)x2 - (int)x1 ), dy = abs( (int)y2 - (int)y1 ), dz = abs( (int)z2 - (int)z1 );
+	int l = max( max( dx, dy ), dz );
+	if (l < 1) return;
+	float sx = (float)dx / l, sy = (float)dy / l, sz = (float)dz / l;
+	float x = (float)x1, y = (float)y1, z = (float)z1;
+	for( int i = 0; i < l; i++ )
+	{
+		world->Set( (int)x, (int)y, (int)z, c );
+		x += sx, y += sy, z += sz;
+	}
+}
+void Line( const uint3 A, const uint3 B, const uint c ) { Line( A.x, A.y, A.z, B.x, B.y, B.z, c ); }
 void XLine( const uint3 pos, int l, const uint c ) { XLine( pos.x, pos.y, pos.z, l, c ); }
 void XLine( const int3 pos, int l, const uint c ) { XLine( pos.x, pos.y, pos.z, l, c ); }
 void YLine( const uint x, const uint y, const uint z, int l, const uint c )

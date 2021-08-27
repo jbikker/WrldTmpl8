@@ -59,6 +59,8 @@ void DrawBigTiles( const char* tileString, const uint x, const uint y, const uin
 void DrawBigTiles( const char* tileString, const int3 pos );
 void DrawBigTiles( const char* tileString, const uint3 pos );
 void LookAt( const float3 pos, const float3 target );
+void Line( const uint x1, const uint y1, const uint z1, const uint x2, const uint y2, const uint z2, const uint c );
+void Line( const uint3 A, const uint3 B, const uint c );
 void XLine( const uint x, const uint y, const uint z, int l, const uint c );
 void XLine( const uint3 pos, int l, const uint c );
 void XLine( const int3 pos, int l, const uint c );
