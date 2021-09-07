@@ -1,9 +1,9 @@
 #include "precomp.h"
 #include "mygame.h"
- 
+
 Game* game = new MyGame();
 uint sprite, frame = 0;
- 
+
 // -----------------------------------------------------------
 // Initialize the application
 // -----------------------------------------------------------
@@ -16,17 +16,14 @@ void MyGame::Init()
     LookAt( make_float3( 280, 128, 50 ), make_float3( 320, 128, 512 ) );
 }
 
-void MyGame::DrawI( int x, int y, int z, int color )
-{
-	Line( x, y, z + 400, x + 60, y, z + 400, color );
-	Line( x + 30, y, z + 400, 270, y, z, color );
-	Line( x, y, z, x + 60, y, z, color );
-}
-
 // -----------------------------------------------------------
 // Main application tick function
 // -----------------------------------------------------------
 void MyGame::Tick( float deltaTime )
 {
-	DrawI( 240, 20, 400, 1 );
+	// This function gets called once per frame by the template code.
+	Print( "Hello World!", 280, 128, 512, 1 );
+	MoveSpriteTo( sprite, 320, 80, 512 );
+	SetSpriteFrame( sprite, frame / 4 );
+	frame = (frame + 1) % 128;
 }
