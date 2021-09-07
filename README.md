@@ -22,10 +22,6 @@ This code is completely free to use and distribute in any form.
 Utrecht, 2015-2021, Utrecht University<br/>
 Breda, 2014 and 2020-2021, NHTV/IGAD/BUAS<br/>
 Jacco Bikker<br/>
-with contributions from:<br>
-Hugo Peters<br>
-Brian Janssen<br>
-Christian Oliveros<br>
 Report problems and suggestions to bikker.j@gmail.com.
 
 *Changelog*

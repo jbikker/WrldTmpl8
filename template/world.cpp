@@ -30,9 +30,9 @@ static const uint commitSize = BRICKCOMMITSIZE + gridSize;
 World::World( const uint targetID )
 {
 	// create the commit buffer, used to sync CPU-side changes to the GPU
-	// NEW: fixed brick array, B&H'21
 	if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
 	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize, 0, 0 );
+	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
 	// store top-level grid in a 3D texture
 	cl_image_format fmt;
 	fmt.image_channel_order = CL_R;
@@ -46,23 +46,29 @@ World::World( const uint targetID )
 	gridMap = clCreateImage( Kernel::GetContext(), CL_MEM_HOST_NO_ACCESS, &fmt, &desc, 0, 0 );
 	// create brick storage
 	brick = (uchar*)_aligned_malloc( BRICKCOUNT * BRICKSIZE, 64 );
-	brickBackup = (uchar*)_aligned_malloc( BRICKCOUNT * BRICKSIZE, 64 );
 	for (int i = 0; i < 4; i++)
 	{
 		assert( (BRICKCOUNT * BRICKSIZE / 4) == 4 * 64 * 1024 * 1024 /* bytes */ );
 		brickBuffer[i] = new Buffer( 64 /* dwords */ * 1024 * 1024, Buffer::DEFAULT, brick + 256 * 1024 * 1024 * i );
+		brickBuffer[i]->CopyToDevice();
 	}
 	brickInfo = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
-	brickInfoBackup = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
-	// Clear the backup bitarray
-	modifiedBackup.ClearMarks();
+	// create a cyclic array for unused bricks (all of them, for now)
+	trash = new uint[BRICKCOUNT];
+	memset( trash, 0, BRICKCOUNT * 4 );
+	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
+	// prepare a test world
+	grid = gridOrig = (uint*)_aligned_malloc( GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 64 );
+	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
+	DummyWorld();
+	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz" );
+	ClearMarks(); // clear 'modified' bit array
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
 	printf( "Allocated %iMB on CPU and GPU for %ik bricks.\n", (int)((BRICKCOUNT * BRICKSIZE) >> 20), (int)(BRICKCOUNT >> 10) );
 	printf( "Allocated %iKB on CPU for bitfield.\n", (int)(BRICKCOUNT >> 15) );
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
-	params.scroll = make_uint3( 0 ); // fast scroll system: B&H'21
 	paramBuffer = new Buffer( sizeof( RenderParams ) / 4, Buffer::DEFAULT | Buffer::READONLY, &params );
 	screen = new Buffer( targetID, Buffer::TARGET );
 	renderer = new Kernel( "cl/kernels.cl", "render" );
@@ -74,6 +80,7 @@ World::World( const uint targetID )
 	renderer->SetArgument( 4, brickBuffer[1] );
 	renderer->SetArgument( 5, brickBuffer[2] );
 	renderer->SetArgument( 6, brickBuffer[3] );
+	renderer->SetArgument( 7, sky );
 	committer->SetArgument( 1, &devmem );
 	committer->SetArgument( 2, brickBuffer[0] );
 	committer->SetArgument( 3, brickBuffer[1] );
@@ -91,17 +98,9 @@ World::World( const uint targetID )
 	blueNoise->CopyToDevice();
 	delete data32;
 	renderer->SetArgument( 8, blueNoise );
-	// pointer to commit buffer
-	cl_mem pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize, 0, 0 );
-	pinnedMemPtr = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, commitSize, 0, 0, 0, 0 );
 	targetTextureID = targetID;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
-	// prepare a test world
-	DummyWorld();
-	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz" );
-	renderer->SetArgument( 7, sky );
-	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
 }
 
 // World Destructor
@@ -111,9 +110,11 @@ World::~World()
 	cl_program sharedProgram = renderer->GetProgram();
 	delete committer;
 	delete renderer;
+	_aligned_free( gridOrig ); // grid itself gets changed after allocation
 	_aligned_free( brick );
 	for (int i = 0; i < 4; i++) delete brickBuffer[i];
 	_aligned_free( brickInfo );
+	delete trash;
 	delete screen;
 	delete paramBuffer;
 	delete sky;
@@ -156,28 +157,11 @@ void World::DummyWorld()
 // ----------------------------------------------------------------------------
 void World::Clear()
 {
-#if 1
 	// easiest top just clear the top-level grid and recycle all bricks
-	memset( brickInfo, 0, BRICKCOUNT * sizeof( BrickInfo ) );
-	memset( brick, 0, BRICKCOUNT * BRICKSIZE );
-	modified.ClearMarks();
-#else
-	for (int z = 0; z < GRIDDEPTH; z++) for (int y = 0; y < GRIDHEIGHT; y++) for (int x = 0; x < GRIDWIDTH; x++)
-	{
-		const uint cellIdx = x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
-		const uint g = grid[cellIdx];
-		if (g & 1)
-		{
-		#if THREADSAFEWORLD
-			const uint trashItem = InterlockedAdd( &trashHead, 31 ) - 31;
-			trash[trashItem & (BRICKCOUNT - 1)] = g >> 1;
-		#else
-			trash[trashHead++ & (BRICKCOUNT - 1)] = g >> 1;
-		#endif
-		}
-	}
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
-#endif
+	memset( trash, 0, BRICKCOUNT * 4 );
+	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
+	ClearMarks();
 }
 
 // World::ScrollX
@@ -185,7 +169,24 @@ void World::Clear()
 void World::ScrollX( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollX( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
-	params.scroll.x += offset / BRICKDIM;
+	const int o = abs( offset / BRICKDIM );
+	for (uint z = 0; z < GRIDDEPTH; z++) for (uint y = 0; y < GRIDHEIGHT; y++)
+	{
+		uint* line = grid + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
+		uint backup[GRIDWIDTH];
+		if (offset < 0)
+		{
+			for (int x = 0; x < o; x++) backup[x] = line[x];
+			for (int x = 0; x < GRIDWIDTH - o; x++) line[x] = line[x + 2];
+			for (int x = 0; x < o; x++) line[GRIDWIDTH - o + x] = backup[x];
+		}
+		else
+		{
+			for (int x = 0; x < o; x++) backup[x] = line[GRIDWIDTH - o + x];
+			for (int x = GRIDWIDTH - 1; x >= o; x--) line[x] = line[x - o];
+			for (int x = 0; x < o; x++) line[x] = backup[x];
+		}
+	}
 }
 
 // World::ScrollX
@@ -193,7 +194,7 @@ void World::ScrollX( const int offset )
 void World::ScrollY( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollY( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
-	params.scroll.y += offset / BRICKDIM;
+	// TODO
 }
 
 // World::ScrollX
@@ -201,7 +202,7 @@ void World::ScrollY( const int offset )
 void World::ScrollZ( const int offset )
 {
 	if (offset % BRICKDIM != 0) FatalError( "ScollZ( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
-	params.scroll.z += offset / BRICKDIM;
+	// TODO
 }
 
 // World::LoadSky
@@ -430,6 +431,7 @@ uint World::LoadSprite( const char* voxFile, bool palShift )
 	const uint offset = palShift ? 1 : 0;
 	for (int i = 0; i < frameCount; i++)
 	{
+		// efficient sprite rendering: B&H'21
 		SpriteFrame* frame = newSprite->frame[i];
 		std::vector<uchar4> drawList;
 		for (int i = 0, z = 0; z < frame->size.z; z++)
@@ -459,6 +461,11 @@ uint World::LoadSprite( const char* voxFile, bool palShift )
 		memcpy( frame->drawList, drawList.data(), drawList.size() * sizeof( uchar4 ) );
 		frame->drawListSize = (uint)drawList.size();
 	}
+	// create the backup frame for sprite movement
+	SpriteFrame* backupFrame = new SpriteFrame();
+	backupFrame->size = maxSize;
+	backupFrame->buffer = new uchar[maxSize.x * maxSize.y * maxSize.z];
+	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
 	// all done, return sprite index
 	return (uint)sprite.size() - 1;
@@ -474,6 +481,10 @@ uint World::CloneSprite( const uint idx )
 	newSprite->frame = sprite[idx]->frame;
 	newSprite->hasShadow = sprite[idx]->hasShadow;
 	// clone backup frame, which will be unique per instance
+	SpriteFrame* backupFrame = new SpriteFrame();
+	backupFrame->size = sprite[idx]->backup->size;
+	backupFrame->buffer = new uchar[backupFrame->size.x * backupFrame->size.y * backupFrame->size.z];
+	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
 	return (uint)sprite.size() - 1;
 }
@@ -502,6 +513,11 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 		memcpy( frame->drawList, drawList.data(), drawList.size() * sizeof( uchar4 ) );
 		newSprite->frame.push_back( frame );
 	}
+	// create the backup frame for sprite movement
+	SpriteFrame* backupFrame = new SpriteFrame();
+	backupFrame->size = size;
+	backupFrame->buffer = new uchar[voxelsPerFrame];
+	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
 	// all done, return sprite index
 	return (uint)sprite.size() - 1;
@@ -517,20 +533,59 @@ uint World::SpriteFrameCount( const uint idx )
 	return (uint)sprite[idx]->frame.size();
 }
 
+// World::EraseSprite (private; called from World::Commit)
+// ----------------------------------------------------------------------------
+void World::EraseSprite( const uint idx )
+{
+	// restore pixels occupied by sprite at previous location
+	const int3 lastPos = sprite[idx]->lastPos;
+	if (lastPos.x == -9999) return;
+	const SpriteFrame* backup = sprite[idx]->backup;
+#if 1
+	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
+	const uchar4* dl = frame->drawList;
+	for (uint i = 0; i < frame->drawListSize; i++)
+	{
+		const uchar4 v = dl[i];
+		Set( v.x + lastPos.x, v.y + lastPos.y, v.z + lastPos.z, backup->buffer[i] );
+	}
+#else
+	const int3 s = backup->size;
+	for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
+		Set( lastPos.x + u, lastPos.y + v, lastPos.z + w, backup->buffer[i] );
+#endif
+}
+
 // World::DrawSprite (private; called from World::Commit)
 // ----------------------------------------------------------------------------
 void World::DrawSprite( const uint idx )
 {
 	// draw sprite at new location
 	const int3& pos = sprite[idx]->currPos;
-	if (pos.x == -9999) return;
-	const SpriteFrame* frame = sprite[idx]->GetFrame();
-	//SpriteFrame* backup = sprite[idx]->backup;
-	for (uint i = 0; i < frame->drawListSize; i++)
+	if (pos.x != -9999)
 	{
-		const uchar4& draw = frame->drawList[i];
-		Set( pos.x + draw.x, pos.y + draw.y, pos.z + draw.z, draw.w );
+		const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
+		SpriteFrame* backup = sprite[idx]->backup;
+		const int3& s = backup->size = frame->size;
+	#if 1
+		const uchar4* dl = frame->drawList;
+		for (uint i = 0; i < frame->drawListSize; i++)
+		{
+			const uchar4 v = dl[i];
+			backup->buffer[i] = Get( v.x + pos.x, v.y + pos.y, v.z + pos.z );
+			Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, v.w );
+		}
+	#else
+		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
+		{
+			const uint voxel = frame->buffer[i];
+			backup->buffer[i] = Get( pos.x + u, pos.y + v, pos.z + w );
+			if (voxel != 0) Set( pos.x + u, pos.y + v, pos.z + w, voxel );
+		}
+	#endif
 	}
+	// store this location so we can remove the sprite later
+	sprite[idx]->lastPos = sprite[idx]->currPos;
 }
 
 // World::DrawSpriteShadow
@@ -538,24 +593,41 @@ void World::DrawSprite( const uint idx )
 void World::DrawSpriteShadow( const uint idx )
 {
 	const int3& pos = sprite[idx]->currPos;
-	const int x0 = pos.x - 12, x1 = pos.x + 12;
-	const int z0 = pos.z - 12, z1 = pos.z + 12;
+	int x0 = pos.x - 12, x1 = pos.x + 12;
+	int z0 = pos.z - 12, z1 = pos.z + 12;
+	sprite[idx]->shadowVoxels = 0;
+	if (!sprite[idx]->preShadow) sprite[idx]->preShadow = new uint4[1024];
 	for (int z = z0; z < z1; z++) for (int x = x0; x < x1; x++)
 	{
 		// shadow outline
-		const int d2 = (z - pos.z) * (z - pos.z) * 3 + (x - pos.x) * (x - pos.x) * 2;
-		if (d2 >= 360) continue;
-		// shadow intensity
-		const int i = (d2 / 3) + 150 + 16 * ((x + z) & 1);
-		// find height
-		for (int v, y = pos.y; y >= 0; y--) if (v = Read( x, y, z ))
+		int d2 = (z - pos.z) * (z - pos.z) * 3 + (x - pos.x) * (x - pos.x) * 2;
+		if (d2 < 360)
 		{
-			int r = (((v >> 5) & 7) * i) >> 8;
-			int g = (((v >> 2) & 7) * i) >> 8;
-			int b = ((v & 3) * i) >> 8;
-			Plot( x, y, z, max( 1, (r << 5) + (g << 2) + b ) );
-			break;
+			// shadow intensity
+			int i = (d2 / 3) + 150 + 16 * ((x + z) & 1);
+			// find height
+			for (int v, y = pos.y; y >= 0; y--) if (v = Read( x, y, z ))
+			{
+				sprite[idx]->preShadow[sprite[idx]->shadowVoxels++] = make_uint4( x, y, z, v );
+				int r = (((v >> 5) & 7) * i) >> 8;
+				int g = (((v >> 2) & 7) * i) >> 8;
+				int b = ((v & 3) * i) >> 8;
+				Plot( x, y, z, max( 1, (r << 5) + (g << 2) + b ) );
+				break;
+			}
 		}
+	}
+}
+
+// World::RemoveSpriteShadow
+// ----------------------------------------------------------------------------
+void World::RemoveSpriteShadow( const uint idx )
+{
+	// restore voxels affected by shadow
+	for (uint i = 0; i < sprite[idx]->shadowVoxels; i++)
+	{
+		uint4 s = sprite[idx]->preShadow[i];
+		Plot( s.x, s.y, s.z, s.w );
 	}
 }
 
@@ -637,12 +709,22 @@ void World::SetParticle( const uint set, const uint idx, const uint3 pos, const 
 // ----------------------------------------------------------------------------
 void World::DrawParticles( const uint set )
 {
-	Particles* p = particles[set];
-	if (p->count == 0 || p->voxel[0].x == -9999) return; // inactive
-	for (uint i = 0; i < p->count; i++)
+	if (particles[set]->count == 0 || particles[set]->voxel[0].x == -9999) return; // inactive
+	for (uint s = particles[set]->count, i = 0; i < s; i++)
 	{
-		const uint4 v = p->voxel[i];
-		//p->backup[i] = make_uint4( v.x, v.y, v.z, Get( v.x, v.y, v.z ) );
+		const uint4 v = particles[set]->voxel[i];
+		particles[set]->backup[i] = make_uint4( v.x, v.y, v.z, Get( v.x, v.y, v.z ) );
+		Set( v.x, v.y, v.z, v.w );
+	}
+}
+
+// World::EraseParticles
+// ----------------------------------------------------------------------------
+void World::EraseParticles( const uint set )
+{
+	for (int s = (int)particles[set]->count, i = s - 1; i >= 0; i--)
+	{
+		const uint4 v = particles[set]->backup[i];
 		Set( v.x, v.y, v.z, v.w );
 	}
 }
@@ -665,9 +747,13 @@ void World::DrawTile( const uint idx, const uint x, const uint y, const uint z )
 }
 void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes )
 {
-	memcpy( brick + cellIdx * BRICKSIZE, voxels, BRICKSIZE );
-	brickInfo[cellIdx].setZeroes( zeroes );
-	modified.Mark( cellIdx );
+	const uint g = grid[cellIdx];
+	uint brickIdx;
+	if ((g & 1) == 1) brickIdx = g >> 1; else brickIdx = NewBrick(), grid[cellIdx] = (brickIdx << 1) | 1;
+	// copy tile data to brick
+	memcpy( brick + brickIdx * BRICKSIZE, voxels, BRICKSIZE );
+	Mark( brickIdx );
+	brickInfo[brickIdx].zeroes = zeroes;
 }
 
 // World::DrawTiles
@@ -750,15 +836,11 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 	while (true)
 	{
 		// check main grid
-		const uint cellIdx =
-			((pos.x / BRICKDIM - params.scroll.x) & (GRIDWIDTH - 1)) +
-			((pos.z / BRICKDIM - params.scroll.z) & (GRIDDEPTH - 1)) * GRIDWIDTH +
-			((pos.y / BRICKDIM - params.scroll.y) & (GRIDHEIGHT - 1)) * GRIDWIDTH * GRIDDEPTH;
-		const auto& info = brickInfo[cellIdx];
-		if (!info.isAir()) if (info.isSolid()) /* solid */
+		const uint o = grid[pos.x / BRICKDIM + (pos.z / BRICKDIM) * GRIDWIDTH + (pos.y / BRICKDIM) * GRIDWIDTH * GRIDDEPTH];
+		if (o != 0) if ((o & 1) == 0) /* solid */
 		{
 			dist = t, N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
-			return cellIdx;
+			return o >> 1;
 		}
 		else // brick
 		{
@@ -772,7 +854,7 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 			float dmz = ((float)((p & 1023) + OFFS_Z) - A.z) * rV.z, d = t;
 			do
 			{
-				const uint idx = cellIdx * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
 				const unsigned int color = brick[idx];
 				if (color != 0U)
 				{
@@ -848,15 +930,13 @@ void World::Render()
 	}
 	// get render parameters to GPU and invoke kernel asynchronously
 	paramBuffer->CopyToDevice( false );
-	static int startDelay = 10;
-	if (startDelay == 0) renderer->Run( screen, make_int2( 32, 4 ) ); else startDelay--;
+	renderer->Run( screen, make_int2( 32, 4 ) );
 }
 
 // World::Commit
 // ----------------------------------------------------------------------------
-void World::Draw()
+void World::Commit()
 {
-	createBackup = true;
 	// add the sprites and particles to the world
 	for (int s = (int)sprite.size(), i = 0; i < s; i++)
 	{
@@ -864,73 +944,63 @@ void World::Draw()
 		DrawSprite( i );
 	}
 	for (int s = (int)particles.size(), i = 0; i < s; i++) DrawParticles( i );
-	createBackup = false;
-}
-
-void World::Commit()
-{
 	// make sure the previous commit completed
 	if (commitInFlight) clWaitForEvents( 1, &commitDone );
+	// replace the initial commit buffer by a double-sized buffer in pinned memory
+	static uint* pinnedMemPtr = 0;
+	if (pinnedMemPtr == 0)
+	{
+		const uint pinnedSize = commitSize + gridSize;
+		cl_mem pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 2, 0, 0 );
+		pinnedMemPtr = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, pinnedSize, 0, 0, 0, 0 );
+		StreamCopy( (__m256i*)(pinnedMemPtr + commitSize / 4), (__m256i*)grid, gridSize );
+		grid = pinnedMemPtr + commitSize / 4; // top-level grid resides at the start of the commit buffer
+	}
 	// gather changed bricks
 	tasks = 0;
 	uint* brickIndices = pinnedMemPtr + gridSize / 4;
 	uchar* changedBricks = (uchar*)(brickIndices + MAXCOMMITS);
-	bool changed = firstFrame;
-	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (modified.IsDirty32( j ) /* if not dirty: skip 32 bits at once */)
+	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (IsDirty32( j ) /* if not dirty: skip 32 bits at once */)
 	{
-		changed = true;
 		for (uint k = 0; k < 32; k++)
 		{
 			const uint i = j * 32 + k;
-			if (!modified.IsDirty( i )) continue;
-			pinnedMemPtr[i] = brickInfo[i].getData();
-			if (brickInfo[i].isSolid()) continue;
+			if (!IsDirty( i )) continue;
 			*brickIndices++ = i; // store index of modified brick at start of commit buffer
 			StreamCopy( (__m256i*)changedBricks, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
 			changedBricks += BRICKSIZE, tasks++;
 		}
-		modified.ClearMarks32( j );
+		ClearMarks32( j );
 		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
 	}
-	// if there is no data to send, then we are done.
-	if (!changed) return;
-	// copy top-level grid: enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
-	const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE);
-	clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
-	// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
-	size_t origin[3] = { 0, 0, 0 };
-	size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
-	clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
-	copyInFlight = true;	// next render should wait for this commit to complete
-	firstFrame = false;		// next frame is not the first frame
-}
-
-void World::Erase()
-{
+	// copy top-level grid to start of pinned buffer in preparation of final transfer
+	if (tasks > 0 || firstFrame) StreamCopyMT( (__m256i*)pinnedMemPtr, (__m256i*)grid, gridSize );
+	// asynchroneously copy the CPU data to the GPU via the commit buffer
+	if (tasks > 0 || firstFrame)
+	{
+		// enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
+		const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE);
+		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
+		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
+		size_t origin[3] = { 0, 0, 0 };
+		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
+		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
+		copyInFlight = true;	// next render should wait for this commit to complete
+		firstFrame = false;		// next frame is not the first frame
+	}
 	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites and particles
 	// NOTE: this must explicitly happen in reverse order.
-	for (uint j = 0; j < BRICKCOUNT / 32; j++) if (modifiedBackup.IsDirty32( j ) /* if not dirty: skip 32 bits at once */)
+	for (int s = (int)particles.size(), i = s - 1; i >= 0; i--) EraseParticles( i );
+	for (int s = (int)sprite.size(), i = s - 1; i >= 0; i--)
 	{
-		for (uint k = 0; k < 32; k++)
-		{
-			const uint i = j * 32 + k;
-			if (!modifiedBackup.IsDirty( i )) continue;
-			const auto& backupInfo = brickInfoBackup[i];
-			brickInfo[i] = brickInfoBackup[i];
-			modified.Mark( i );
-			if (!backupInfo.isSolid()) // Solid backup
-			{
-				const uint offset = i * BRICKSIZE;
-				StreamCopy( (__m256i*)(brick + offset), (__m256i*)(brickBackup + offset), BRICKSIZE );
-			}
-		}
-		modifiedBackup.ClearMarks32( j );
+		EraseSprite( i );
+		if (sprite[i]->hasShadow) RemoveSpriteShadow( i );
 	}
 }
 
 // World::StreamCopyMT
 // ----------------------------------------------------------------------------
-#define COPYTHREADS	8
+#define COPYTHREADS	4
 void World::StreamCopyMT( __m256i* dst, __m256i* src, const uint bytes )
 {
 	// fast copying of large 32-byte aligned / multiple of 32 sized data blocks:

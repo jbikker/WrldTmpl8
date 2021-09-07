@@ -172,8 +172,8 @@ void XLine( const uint x, const uint y, const uint z, int l, const uint c )
 }
 void Line( const uint x1, const uint y1, const uint z1, const uint x2, const uint y2, const uint z2, const uint c )
 {
-	int dx = abs( (int)x2 - (int)x1 ), dy = abs( (int)y2 - (int)y1 ), dz = abs( (int)z2 - (int)z1 );
-	int l = max( max( dx, dy ), dz );
+	int dx = (int)x2 - x1, dy = (int)y2 - y1, dz = (int)z2 - z1;
+	int l = max( max( abs( dx ), abs( dy ) ), abs( dz ) );
 	if (l < 1) return;
 	float sx = (float)dx / l, sy = (float)dy / l, sz = (float)dz / l;
 	float x = (float)x1, y = (float)y1, z = (float)z1;
@@ -312,9 +312,7 @@ void main()
 		world->Render();
 		game->Tick( deltaTime );
 		if (GetAsyncKeyState( VK_LSHIFT )) for( int i = 0; i < 3; i++ ) game->Tick( deltaTime );
-		world->Draw();
 		world->Commit();
-		world->Erase();
 	#ifdef USE_CPU_DEVICE
 		// copy the destination buffer to the renderTarget texture
 		// TODO

@@ -28,7 +28,7 @@ float4 FixZeroDeltas( float4 V )
 // mighty two-level grid traversal
 uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, 
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps, __constant struct RenderParams* params)
+	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
 {
 	__global const unsigned char* bricks[4] = { brick0, brick1, brick2, brick3 };
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
@@ -53,20 +53,12 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 	uint last = 0;
 	while (true)
 	{
-		const uint cellIdx = 
-			((pos.x / BRICKDIM - params->scroll.x) & (GRIDWIDTH - 1)) +
-			((pos.z / BRICKDIM - params->scroll.z) & (GRIDDEPTH - 1)) * GRIDWIDTH +
-			((pos.y / BRICKDIM - params->scroll.y) & (GRIDHEIGHT - 1)) * GRIDWIDTH * GRIDDEPTH;
 		// check main grid
-		const uint o = read_imageui( grid, (int4)(
-			(pos.x / BRICKDIM - params->scroll.x) & (GRIDWIDTH - 1),
-			(pos.z / BRICKDIM - params->scroll.z) & (GRIDDEPTH - 1),
-			(pos.y / BRICKDIM - params->scroll.y) & (GRIDHEIGHT - 1),
-			0) ).x;
-		if (o != 0) if ((o & 1) == 0)
+		const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0) ).x;
+		if (o != 0) if ((o & 1) == 0) /* solid */
 		{
 			*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
-			return cellIdx;
+			return o >> 1;
 		}
 		else // brick
 		{
@@ -80,7 +72,7 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 			float dmz = (float)((p & 1023) + OFFS_Z - A.z) * rV.z, d = t;
 			do
 			{
-				const uint idx = cellIdx * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
 				const unsigned char* page = bricks[(idx >> 28) & 3];
 				const unsigned int color = page[idx & 0xfffffff];
 				if (color != 0U)
@@ -190,7 +182,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	// trace primary ray
 	float dist;
 	float3 N;
-	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */, params );
+	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 
 	// visualize result
 	float3 pixel;
@@ -217,7 +209,7 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 			const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
 			float3 N2;
 			float dist2;
-			const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 /* cap on GI ray length */, params );
+			const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 /* cap on GI ray length */ );
 			if (voxel2 == 0)
 			{
 				// sky

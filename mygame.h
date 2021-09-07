@@ -9,6 +9,7 @@ public:
 	// game flow methods
 	void Init();
 	void Tick( float deltaTime );
+	void DrawI( int x, int y, int z, int color );
 	void Shutdown() { /* implement if you want to do something on exit */ }
 	// input handling
 	void MouseUp( int button ) { /* implement if you want to detect mouse button presses */ }
