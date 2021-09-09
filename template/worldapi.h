@@ -59,6 +59,10 @@ void DrawBigTiles( const char* tileString, const uint x, const uint y, const uin
 void DrawBigTiles( const char* tileString, const int3 pos );
 void DrawBigTiles( const char* tileString, const uint3 pos );
 void LookAt( const float3 pos, const float3 target );
+void LookAt( const int x1, const int y1, const int z1, const int x2, const int y2, const int z2 );
+void LookAt( const float x1, const float y1, const float z1, const float x2, const float y2, const float z2 );
+void Forward( const float d );
+void Forward( const int d );
 void Line( const uint x1, const uint y1, const uint z1, const uint x2, const uint y2, const uint z2, const uint c );
 void Line( const uint3 A, const uint3 B, const uint c );
 void XLine( const uint x, const uint y, const uint z, int l, const uint c );
@@ -72,5 +76,7 @@ void ZLine( const uint3 pos, int l, const uint c );
 void ZLine( const int3 pos, int l, const uint c );
 bool IsOccluded( const float3 P1, const float3 P2 );
 float Trace( const float3 P1, const float3 P2 );
+uint RGB32to8( const uint c );
+uint BGR32to8( const uint c );
 
 // EOF

@@ -164,6 +164,21 @@ void LookAt( const float3 pos, const float3 target )
 {
 	world->SetCameraMatrix( mat4::LookAt( pos, target ) );
 }
+void LookAt( const int x1, const int y1, const int z1, const int x2, const int y2, const int z2 )
+{
+	world->SetCameraMatrix( mat4::LookAt( make_float3( (float)x1, (float)y1, (float)z1 ), make_float3( (float)x2, (float)y2, (float)z2 ) ) );
+}
+void LookAt( const float x1, const float y1, const float z1, const float x2, const float y2, const float z2 )
+{
+	world->SetCameraMatrix( mat4::LookAt( make_float3( x1, y1, z1 ), make_float3( x2, y2, z2 ) ) );
+}
+void Forward( const float d )
+{
+	const float3 V = world->GetCameraViewDir();
+	const float3 P = world->GetCameraPos();
+	world->SetCameraPos( P + d * V );
+}
+void Forward( const int d ) { Forward( (float)d ); }
 void XLine( const uint x, const uint y, const uint z, int l, const uint c )
 {
 	uint u = x;
@@ -215,6 +230,16 @@ float Trace( const float3 P1, const float3 P2 )
 	float3 dummy, D = normalize( P2 - P1 );
 	world->TraceRay( make_float4( P1 + 0.001f * D, 1 ), make_float4( D, 1 ), dist, dummy, 999999 );
 	return dist;
+}
+
+uint RGB32to8( const uint c )
+{ 
+	return ((c >> 6) & 3) + (((c >> 13) & 7) << 2) + (((c >> 21) & 7) << 5); 
+}
+
+uint BGR32to8( const uint c )
+{ 
+	return (((c >> 5) & 7) << 5) + (((c >> 13) & 7) << 2) + ((c >> 22) & 3); 
 }
 
 // GLFW callbacks

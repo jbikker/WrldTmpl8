@@ -4,6 +4,7 @@
 // Acknowledgements:
 // B&H'21 = Brian Janssen and Hugo Peters, INFOMOV'21 assignment
 // CO'21  = Christian Oliveros, INFOMOV'21 assignment
+// MB'21  = Maarten van den Berg, INFOMOV '21 assignment
 
 using namespace Tmpl8;
 
@@ -61,7 +62,7 @@ World::World( const uint targetID )
 	grid = gridOrig = (uint*)_aligned_malloc( GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 64 );
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
-	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz" );
+	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz", 2.5f );
 	ClearMarks(); // clear 'modified' bit array
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
@@ -207,7 +208,7 @@ void World::ScrollZ( const int offset )
 
 // World::LoadSky
 // ----------------------------------------------------------------------------
-void World::LoadSky( const char* filename, const char* bin_name )
+void World::LoadSky( const char* filename, const char* bin_name, const float scale )
 {
 	// attempt to load skydome from compressed binary file
 	float* pixels = 0;
@@ -221,6 +222,21 @@ void World::LoadSky( const char* filename, const char* bin_name )
 		pixels = (float*)MALLOC64( skySize.x * skySize.y * sizeof( float ) * 3 );
 		gzread( f, pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
 		gzclose( f );
+		if (scale != 1.0f) for (int i = 0; i < skySize.x * skySize.y * 3; i++) pixels[i] *= scale;
+	#if 0
+		// add a checkerboard pattern
+		for (int y = 1250; y < 2500; y++) for (int x = 0; x < 5000; x++)
+		{
+			const float t = (x - 2500.0f) / 5000.0f * 2 * PI;
+			const float p = -(y - 1250.0f) / 2500.0f * PI;
+			const float3 D = make_float3( cosf( p ) * cosf( t ), sinf( p ), cosf( p ) * sinf( t ) );
+			const float3 O = make_float3( 0, 20, 0 ), P = O - 20.0f / D.y * D;
+			const int u = (int)(P.x * 0.02f + 100000);
+			const int v = (int)(P.z * 0.02f + 100000);
+			const float d = ((u + v) & 1) ? 0.7f : 0.05f;
+			for (int i = 0; i < 3; i++) pixels[x * 3 + y * 15000 + i] = d;
+		}
+	#endif
 	}
 #else
 	ifstream f( bin_name, ios::binary );
@@ -267,7 +283,7 @@ void World::LoadSky( const char* filename, const char* bin_name )
 		f.write( (char*)&skySize.y, sizeof( skySize.y ) );
 		f.write( (char*)pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
 	#endif
-	}
+		}
 	// convert to float4
 	float4* pixel4 = new float4[skySize.x * skySize.y];
 	for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++)

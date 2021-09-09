@@ -109,11 +109,13 @@ public:
 	// initialization
 	void Clear();
 	void DummyWorld();
-	void LoadSky( const char* filename, const char* bin_name );
+	void LoadSky( const char* filename, const char* bin_name, const float scale = 1.0f );
 	void ForceSyncAllBricks();
 	// camera
 	void SetCameraMatrix( const mat4& m ) { camMat = m; }
 	float3 GetCameraViewDir() { return make_float3( camMat[2], camMat[6], camMat[10] ); }
+	float3 GetCameraPos() { return make_float3( camMat[3], camMat[7], camMat[11] ); }
+	void SetCameraPos( const float3 P ) { camMat[3] = P.x, camMat[7] = P.y, camMat[11] = P.z; }
 	mat4& GetCameraMatrix() { return camMat; }
 	// render flow
 	void Commit();
