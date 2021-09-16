@@ -1,7 +1,8 @@
 #include "precomp.h"
 #include "mygame.h"
 
-Game* game = new MyGame();
+Game* CreateGame() { return new MyGame(); }
+
 uint sprite, frame = 0;
 
 // -----------------------------------------------------------

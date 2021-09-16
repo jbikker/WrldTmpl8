@@ -29,9 +29,10 @@ class SpriteFrame
 	// fast sprite system: B&H'21
 public:
 	~SpriteFrame() { _aligned_free( buffer ); }
-	uchar* buffer = 0;					// full frame buffer (width * height * depth)
+	PAYLOAD* buffer = 0;				// full frame buffer (width * height * depth)
 	int3 size = make_int3( 0 );			// size of the sprite over x, y and z
-	uchar4* drawList;					// compacted list of opaque sprite voxels
+	uchar4* drawPos;					// compacted list of opaque sprite voxel positions
+	PAYLOAD* drawVal;					// compacted list of opaque sprite voxel values
 	uint drawListSize;					// number of voxels in buffer2
 };
 
@@ -46,6 +47,24 @@ public:
 	bool hasShadow = false;				// set to true to enable a drop shadow
 	uint4* preShadow = 0;				// room for backup of voxels overwritten by shadow
 	uint shadowVoxels = 0;				// size of backup voxel array
+};
+
+class SpriteManager
+{
+	// this class replaces the original World::sprite vector; it exists purely so that
+	// we can create sprites at the global scope safely, should we so desire.
+public:
+	SpriteManager() = default;
+	static SpriteManager* GetSpriteManager()
+	{
+		if (!spriteManager) spriteManager = new SpriteManager();
+		return spriteManager;
+	}
+	uint LoadSprite( const char* voxFile, bool palShift = true );
+	uint CloneSprite( const uint idx );
+	vector<Sprite*> sprite;				// list of loaded sprites
+private:
+	static inline SpriteManager* spriteManager = 0;
 };
 
 class Particles
@@ -63,6 +82,24 @@ public:
 	uint count = 0;						// particle count for the set
 };
 
+class ParticlesManager
+{
+	// this class replaces the original World::particles vector;
+	// see SpriteManager for details.
+public:
+	ParticlesManager() = default;
+	static ParticlesManager* GetParticlesManager()
+	{
+		if (!particlesManager) particlesManager = new ParticlesManager();
+		return particlesManager;
+	}
+	uint CreateParticles( const uint count );
+	// data members
+	vector<Particles*> particles;		// list of particle sets
+private:
+	static inline ParticlesManager* particlesManager = 0;
+};
+
 // Tile system overview:
 // The top-level grid / brick layout of the world (see below) fits well with the 
 // classic concept of tiled graphics. A tile is simply an 8x8x8 or 16x16x16 chunk of 
@@ -75,7 +112,7 @@ class Tile
 public:
 	Tile() = default;
 	Tile( const char* voxFile );
-	uchar voxels[BRICKSIZE];			// tile voxel data
+	PAYLOAD voxels[BRICKSIZE];			// tile voxel data
 	uint zeroes;						// number of transparent voxels in the tile
 };
 
@@ -85,6 +122,26 @@ public:
 	BigTile() = default;
 	BigTile( const char* voxFile );
 	Tile tile[8];						// a big tile is just 2x2x2 tiles stored together
+};
+
+class TileManager
+{
+	// this class replaces the original World::tile and World::bigTile vectors;
+	// see SpriteManager for details.
+public:
+	TileManager() = default;
+	static TileManager* GetTileManager()
+	{
+		if (!tileManager) tileManager = new TileManager();
+		return tileManager;
+	}
+	uint LoadTile( const char* voxFile );
+	uint LoadBigTile( const char* voxFile );
+	// data members
+	vector<Tile*> tile;					// list of loaded tiles
+	vector<BigTile*> bigTile;			// list of loaded big tiles
+private:
+	static inline TileManager* tileManager = 0;
 };
 
 // Voxel world data structure:
@@ -124,18 +181,13 @@ public:
 	void Sphere( const float x, const float y, const float z, const float r, const uint c );
 	void HDisc( const float x, const float y, const float z, const float r, const uint c );
 	void Print( const char* text, const uint x, const uint y, const uint z, const uint c );
-	uint LoadSprite( const char* voxFile, bool palShift = true );
-	uint CloneSprite( const uint idx );
 	uint CreateSprite( const int3 pos, const int3 size, const int frames );
 	uint SpriteFrameCount( const uint idx );
 	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z );
 	void RemoveSprite( const uint idx );
 	void SetSpriteFrame( const uint idx, const uint frame );
 	bool SpriteHit( const uint A, const uint B );
-	uint CreateParticles( const uint count );
 	void SetParticle( const uint set, const uint idx, const uint3 pos, const uint v );
-	uint LoadTile( const char* voxFile );
-	uint LoadBigTile( const char* voxFile );
 	void DrawTile( const uint idx, const uint x, const uint y, const uint z );
 	void DrawTiles( const char* tileString, const uint x, const uint y, const uint z );
 	void DrawBigTile( const uint idx, const uint x, const uint y, const uint z );
@@ -154,7 +206,12 @@ private:
 	void RemoveSpriteShadow( const uint idx );
 	void EraseParticles( const uint set );
 	void DrawParticles( const uint set );
-	void DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes );
+	void DrawTileVoxels( const uint cellIdx, const PAYLOAD* voxels, const uint zeroes );
+	// convenient access to 'guaranteed to be instantiated' sprite, particle, tile lists
+	vector<Sprite*>& GetSpriteList() { return SpriteManager::GetSpriteManager()->sprite; }
+	vector<Particles*>& GetParticlesList() { return ParticlesManager::GetParticlesManager()->particles; }
+	vector<Tile*>& GetTileList() { return TileManager::GetTileManager()->tile; }
+	vector<BigTile*>& GetBigTileList() { return TileManager::GetTileManager()->bigTile; }
 public:
 	// low-level voxel access
 	__forceinline uint Get( const uint x, const uint y, const uint z )
@@ -184,7 +241,7 @@ public:
 		{
 			if (g1 == v) return; // about to set the same value; we're done here
 			const uint newIdx = NewBrick();
-		#if BRICKDIM == 8
+		#if BRICKDIM == 8 && PAYLOADSIZE == 1
 			// fully unrolled loop for writing the 512 bytes needed for a single brick, faster than memset
 			const __m256i zero8 = _mm256_set1_epi8( static_cast<char>(g1) );
 			__m256i* d8 = (__m256i*)(brick + newIdx * BRICKSIZE);
@@ -192,9 +249,20 @@ public:
 			d8[4] = zero8, d8[5] = zero8, d8[6] = zero8, d8[7] = zero8;
 			d8[8] = zero8, d8[9] = zero8, d8[10] = zero8, d8[11] = zero8;
 			d8[12] = zero8, d8[13] = zero8, d8[14] = zero8, d8[15] = zero8;
+		#elif BRICKDIM == 8 && PAYLOADSIZE == 2
+			// fully unrolled loop for writing 1KB needed for a single brick, faster than memset
+			const __m256i zero16 = _mm256_set1_epi16( static_cast<short>(g1) );
+			__m256i* d = (__m256i*)(brick + newIdx * BRICKSIZE);
+			d[0] = zero16, d[1] = zero16, d[2] = zero16, d[3] = zero16;
+			d[4] = zero16, d[5] = zero16, d[6] = zero16, d[7] = zero16;
+			d[8] = zero16, d[9] = zero16, d[10] = zero16, d[11] = zero16;
+			d[12] = zero16, d[13] = zero16, d[14] = zero16, d[15] = zero16;
+			d[16] = zero16, d[17] = zero16, d[18] = zero16, d[19] = zero16;
+			d[20] = zero16, d[21] = zero16, d[22] = zero16, d[23] = zero16;
+			d[24] = zero16, d[25] = zero16, d[26] = zero16, d[27] = zero16;
+			d[28] = zero16, d[29] = zero16, d[30] = zero16, d[31] = zero16;
 		#else
-			// let's keep the memset in case we want to experiment with other brick sizes
-			memset( brick + newIdx * BRICKSIZE, g1, BRICKSIZE ); // copy solid value to brick
+			// TODO: generic case
 		#endif
 			// we keep track of the number of zeroes, so we can remove fully zeroed bricks
 			brickInfo[newIdx].zeroes = g == 0 ? BRICKSIZE : 0;
@@ -337,7 +405,7 @@ private:
 	mat4 camMat;						// camera matrix to be used for rendering
 	uint* grid = 0, *gridOrig = 0;		// pointer to host-side copy of the top-level grid
 	Buffer* brickBuffer[4];				// OpenCL buffer for the bricks
-	uchar* brick = 0;					// pointer to host-side copy of the bricks
+	PAYLOAD* brick = 0;					// pointer to host-side copy of the bricks
 	uint* modified = 0;					// bitfield to mark bricks for synchronization
 	BrickInfo* brickInfo = 0;			// maintenance data for bricks: zeroes, location
 	volatile inline static LONG trashHead = BRICKCOUNT;	// thrash circular buffer tail
@@ -361,13 +429,6 @@ private:
 	cl_mem gridMap;						// host-side 3D image for top-level
 	Surface* font;						// bitmap font for print command
 	bool firstFrame = true;				// for doing things in the first frame
-public: // TODO: protected
-	vector<Sprite*> sprite;				// list of loaded sprites
-	vector<Particles*> particles;		// list of particle sets
-	vector<Tile*> tile;					// list of loaded tiles
-	vector<BigTile*> bigTile;			// list of loaded big tiles
-private:
-	struct RayPacket { float4 Nt[TILESIZE2]; uint c[TILESIZE2]; };
 };
 
 } // namespace Tmpl8

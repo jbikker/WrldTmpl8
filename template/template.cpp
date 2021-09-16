@@ -30,7 +30,10 @@ static bool hasFocus = true, running = true;
 static GLTexture* renderTarget = 0;
 static int scrwidth = 0, scrheight = 0;
 static World* world = 0;
-extern Game* game;
+static Game* game = 0;
+
+// find the game implementation
+Game* CreateGame();
 
 // world access / C API implementation
 World* GetWorld() { return world; }
@@ -100,7 +103,7 @@ void Print( const char* text, const int3 pos, const uint c )
 {
 	world->Print( text, pos.x, pos.y, pos.z, c );
 }
-uint LoadSprite( const char* voxFile, bool palShift ) { return world->LoadSprite( voxFile, palShift ); }
+uint LoadSprite( const char* voxFile, bool palShift ) { return SpriteManager::GetSpriteManager()->LoadSprite( voxFile, palShift ); }
 uint CreateSprite( const int3 pos, const int3 size, const int frames )
 {
 	return world->CreateSprite( pos, size, frames );
@@ -109,10 +112,15 @@ uint CreateSprite( const int x, const int y, const int z, const int w, const int
 {
 	return CreateSprite( make_int3( x, y, z ), make_int3( w, h, d ), frames );
 }
-int3 GetSpriteFrameSize( const uint idx ) { return world->sprite[idx]->frame[world->sprite[idx]->currFrame]->size; }
+int3 GetSpriteFrameSize( const uint idx ) 
+{
+	auto& sprite = SpriteManager::GetSpriteManager()->sprite;
+	return sprite[idx]->frame[sprite[idx]->currFrame]->size; 
+}
 uint GetSpriteVoxel( const uint idx, const int3 pos )
 {
-	SpriteFrame* f = world->sprite[idx]->frame[world->sprite[idx]->currFrame];
+	auto& sprite = SpriteManager::GetSpriteManager()->sprite;
+	SpriteFrame* f = sprite[idx]->frame[sprite[idx]->currFrame];
 	const int3 s = f->size;
 	return f->buffer[pos.x + pos.y * s.x + pos.z * s.x * s.y];
 }
@@ -124,8 +132,8 @@ uint GetSpriteVoxel( const uint idx, const uint x, const uint y, const uint z )
 {
 	return GetSpriteVoxel( idx, make_int3( x, y, z ) );
 }
-uint CloneSprite( const uint idx ) { return world->CloneSprite( idx ); }
-uint CreateParticles( const uint count ) { return world->CreateParticles( count ); }
+uint CloneSprite( const uint idx ) { return SpriteManager::GetSpriteManager()->CloneSprite( idx ); }
+uint CreateParticles( const uint count ) { return ParticlesManager::GetParticlesManager()->CreateParticles( count ); }
 void SetParticle( const uint set, const uint idx, const int3 pos, const uint v )
 {
 	world->SetParticle( set, idx, make_uint3( pos ), v );
@@ -138,16 +146,16 @@ void SetParticle( const uint set, const uint idx, const uint x, const uint y, co
 {
 	world->SetParticle( set, idx, make_uint3( x, y, z ), v );
 }
-void EnableShadow( const uint idx ) { world->sprite[idx]->hasShadow = true; }
-void DisableShadow( const uint idx ) { world->sprite[idx]->hasShadow = false; }
+void EnableShadow( const uint idx ) { SpriteManager::GetSpriteManager()->sprite[idx]->hasShadow = true; }
+void DisableShadow( const uint idx ) { SpriteManager::GetSpriteManager()->sprite[idx]->hasShadow = false; }
 void SetSpriteFrame( const uint idx, const uint frame ) { world->SetSpriteFrame( idx, frame ); }
 bool SpriteHit( const uint A, const uint B ) { return world->SpriteHit( A, B ); }
 void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->MoveSpriteTo( idx, x, y, z ); }
 void MoveSpriteTo( const uint idx, const int3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 void MoveSpriteTo( const uint idx, const uint3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 void RemoveSprite( const uint idx ) { world->RemoveSprite( idx ); }
-uint LoadTile( const char* voxFile ) { return world->LoadTile( voxFile ); }
-uint LoadBigTile( const char* voxFile ) { return world->LoadBigTile( voxFile ); }
+uint LoadTile( const char* voxFile ) { return TileManager::GetTileManager()->LoadTile( voxFile ); }
+uint LoadBigTile( const char* voxFile ) { return TileManager::GetTileManager()->LoadBigTile( voxFile ); }
 void DrawTile( const uint idx, const uint x, const uint y, const uint z ) { world->DrawTile( idx, x, y, z ); }
 void DrawTile( const uint idx, const int3 pos ) { world->DrawTile( idx, pos.x, pos.y, pos.z ); }
 void DrawTile( const uint idx, const uint3 pos ) { world->DrawTile( idx, pos.x, pos.y, pos.z ); }
@@ -243,16 +251,14 @@ uint BGR32to8( const uint c )
 }
 
 // GLFW callbacks
+void InitRenderTarget( int w, int h )
+{
+	// allocate render target and surface
+		scrwidth = w, scrheight = h;
+		renderTarget = new GLTexture( scrwidth, scrheight, GLTexture::INTTARGET );
+}
 void ReshapeWindowCallback( GLFWwindow* window, int w, int h )
 {
-	// before first frame: allocate render target and surface
-	if (game != 0) if (renderTarget == 0 && w > 0 && h > 0)
-	{
-		scrwidth = w, scrheight = h;
-		delete renderTarget;
-		renderTarget = new GLTexture( scrwidth, scrheight, GLTexture::INTTARGET );
-	}
-	// all other frames: just resize the window
 	glViewport( 0, 0, w, h );
 }
 void KeyEventCallback( GLFWwindow* window, int key, int scancode, int action, int mods )
@@ -319,15 +325,16 @@ void main()
 	glfwShowWindow( window );
 #endif
 	// initialize game
-	ReshapeWindowCallback( 0, SCRWIDTH, SCRHEIGHT );
-	Shader* shader = new Shader(
-		"#version 330\nin vec4 p;\nin vec2 t;out vec2 u;void main(){u=t;gl_Position=p;}",
-		"#version 330\nuniform sampler2D c;in vec2 u;out vec4 f;void main(){f=sqrt(texture(c,u));}", true );
+	InitRenderTarget( SCRWIDTH, SCRHEIGHT );
 	world = new World( renderTarget->ID );
+	game = CreateGame();
 	game->Init();
 	// after init, sync all bricks to GPU
 	world->ForceSyncAllBricks();
 	// done, enter main loop
+	Shader* shader = new Shader(
+		"#version 330\nin vec4 p;\nin vec2 t;out vec2 u;void main(){u=t;gl_Position=p;}",
+		"#version 330\nuniform sampler2D c;in vec2 u;out vec4 f;void main(){f=sqrt(texture(c,u));}", true );
 	float deltaTime = 0;
 	while (!glfwWindowShouldClose( window ))
 	{

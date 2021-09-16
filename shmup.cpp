@@ -3,7 +3,8 @@
 #include "irrklang.h"
 using namespace irrklang;
 
-Game* game = new SHMUP();
+Game* CreateGame() { return new SHMUP(); }
+
 ISoundEngine* engine;
 ISoundSource* pew = 0, * rumble = 0, * explosion = 0, * boom = 0, * shot = 0;
 ISoundSource* alarm = 0, * charge = 0;
@@ -295,9 +296,15 @@ void SHMUP::UpdateCamera()
 // -----------------------------------------------------------
 uint SHMUP::LandColor( int odd, int h, int dhx, int dhy )
 {
+#if PAYLOADSIZE == 1
 	uint green = min( 7, (h + odd * 2) >> 3 );
 	uint grey = min( 3, max( dhx, dhy ) );
 	return (green << 2) + (grey << 6) + grey;
+#else
+	uint green = min( 15, (h + odd * 2) >> 2 );
+	uint grey = min( 7, 2 * max( dhx, dhy ) );
+	return (green << 4) + (grey << 9) + grey;
+#endif
 }
 
 // -----------------------------------------------------------

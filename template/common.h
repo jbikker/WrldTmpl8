@@ -19,6 +19,17 @@
 #define BRICKDIM	8		// brick dimensions
 #define BDIMLOG2	3		// must be log2(BRICKDIM)
 #define MAXCOMMITS	8192	// maximum number of bricks that can be committed per frame
+#if 0
+// 8-bit voxels: RGB332
+#define VOXEL8
+#define PAYLOAD unsigned char
+#define PAYLOADSIZE	1
+#else
+// 16-bit voxels: MRGB4444, where M=material index
+#define VOXEL16
+#define PAYLOAD unsigned short
+#define PAYLOADSIZE 2
+#endif
 
 // renderer performance setting: set to 0 for slower devices, up to 8 for fast GPUs
 #define GIRAYS		0
@@ -27,6 +38,7 @@
 #define PANINI		0
 
 // some useful color names
+#ifdef VOXEL8
 #define BLACK		(1<<5)	// actually: dark red; black itself is transparent
 #define GREEN		(7<<2)
 #define BLUE		3
@@ -37,6 +49,20 @@
 #define ORANGE		((7<<5)+(5<<2))
 #define LIGHTBLUE	(3+(4<<2)+(4<<5))
 #define BROWN		((3<<5)+(1<<2))
+#define LIGHTRED	(7<<5)+(2<<2)+1
+#else
+#define BLACK		0x001	// actually: dark blue; black itself is transparent
+#define GREEN		0x0F0
+#define BLUE		0x00F
+#define RED			0xF00
+#define YELLOW		0xFF0
+#define WHITE		0xFFF
+#define GREY		0x777
+#define ORANGE		0xF70
+#define LIGHTBLUE	0x77F
+#define BROWN		0x720
+#define LIGHTRED	0xF55
+#endif
 
 // renderer
 struct RenderParams
@@ -60,8 +86,12 @@ struct RenderParams
 #define GRIDDEPTH	(MAPDEPTH / BRICKDIM)
 #define GRIDSIZE	(GRIDWIDTH * GRIDHEIGHT * GRIDWIDTH)
 #define BRICKSIZE	(BRICKDIM * BRICKDIM * BRICKDIM)
-#define BRICKCOUNT	((MAPWIDTH / BRICKDIM) * (MAPHEIGHT / BRICKDIM) * (MAPDEPTH / BRICKDIM))
-#define BRICKCOMMITSIZE	(MAXCOMMITS * BRICKSIZE + MAXCOMMITS * 4 /* bytes */)
+// note: we reserve 50% of the theoretical peak; a normal scene shouldn't come close to
+// using that many unique (non-empty!) bricks.
+#define BRICKCOUNT	((((MAPWIDTH / BRICKDIM) * (MAPHEIGHT / BRICKDIM) * (MAPDEPTH / BRICKDIM))) / 2)
+#define BRICKCOMMITSIZE	(MAXCOMMITS * BRICKSIZE * PAYLOADSIZE + MAXCOMMITS * 4 /* bytes */)
+#define CHUNKCOUNT	4
+#define CHUNKSIZE	((BRICKCOUNT * BRICKSIZE * PAYLOADSIZE) / CHUNKCOUNT)
 
 // constants
 #define PI			3.14159265358979323846264f

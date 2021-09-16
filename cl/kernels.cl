@@ -25,11 +25,82 @@ float4 FixZeroDeltas( float4 V )
 	return V;
 }
 
-// mighty two-level grid traversal
-uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid, 
+bool rayBoxIntersection( float4 O, float4 rD, float* tmin, float* tmax )
+{
+	// 0-tolerant version, from https://github.com/cgyurgyik/fast-voxel-traversal-algorithm
+	float t0 = 0.0f, t1 = 1e34f, tymin, tymax, tzmin, tzmax;
+	if (rD.x >= 0) t0 = -O.x * rD.x, t1 = (MAPWIDTH - O.x) * rD.x;
+	else t1 = -O.x * rD.x, t0 = (MAPWIDTH - O.x) * rD.x;
+	if (rD.y >= 0) tymin = -O.y * rD.y, tymax = (MAPHEIGHT - O.y) * rD.y;
+	else tymax = -O.y * rD.y, tymin = (MAPHEIGHT - O.y) * rD.y;
+	if (t0 > tymax || tymin > t1) return false;
+	if (tymin > t0) t0 = tymin;
+	if (tymax < t1) t1 = tymax;
+	if (rD.z >= 0) tzmin = -O.z * rD.z, tzmax = (MAPDEPTH - O.z) * rD.z;
+	else tzmax = -O.z * rD.z, tzmin = (MAPDEPTH - O.z) * rD.z;
+	if (t0 > tzmax || tzmin > t1) return false;
+	if (tzmin > t0) t0 = tzmin;
+	if (tzmax < t1) t1 = tzmax;
+	*tmin = max( 0.0f, t0 ), * tmax = t1;
+	return (t1 > 0.0f);
+}
+
+// refactored two-level grid traversal
+uint TraceRay2( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
 {
+	__global const unsigned char* bricks[4] = { brick0, brick1, brick2, brick3 };
+	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0f / V.x, 1.0f / V.y, 1.0f / V.z, 1.0f);
+	float tmin, tmax, tDeltaX, tMaxX, tDeltaY, tMaxY, tDeltaZ, tMaxZ;
+	int stepX, stepY, stepZ;
+
+	if (!rayBoxIntersection( A, rV, &tmin, &tmax )) return 0;
+
+	float4 ray_start = A + tmin * B;
+
+	int current_X = (int)max( 0.0f, floor( ray_start.x ) ) / BRICKDIM;
+	if (B.x > 0.0f) stepX = 1, tDeltaX = BRICKDIM / B.x, tMaxX = tmin + (current_X * BRICKDIM + BRICKDIM - ray_start.x) / B.x;
+	else if (B.x < 0.0) stepX = -1, tDeltaX = -BRICKDIM / B.x, tMaxX = tmin + (current_X * BRICKDIM - ray_start.x) / B.x;
+	else stepX = 0, tDeltaX = tMaxX = tmax;
+
+	int current_Y = (int)max( 0.0f, floor( ray_start.y ) ) / BRICKDIM;
+	if (B.y > 0.0f) stepY = 1, tDeltaY = BRICKDIM / B.y, tMaxY = tmin + (current_Y * BRICKDIM + BRICKDIM - ray_start.y) / B.y;
+	else if (B.y < 0.0) stepY = -1, tDeltaY = -BRICKDIM / B.y, tMaxY = tmin + (current_Y * BRICKDIM - ray_start.y) / B.y;
+	else stepY = 0, tDeltaY = tMaxY = tmax;
+
+	int current_Z = (int)max( 0.0f, floor( ray_start.z ) ) / BRICKDIM;
+	if (B.z > 0.0f) stepZ = 1, tDeltaZ = BRICKDIM / B.z, tMaxZ = tmin + (current_Z * BRICKDIM + BRICKDIM - ray_start.z) / B.z;
+	else if (B.z < 0.0) stepZ = -1, tDeltaZ = -BRICKDIM / B.z, tMaxZ = tmin + (current_Z * BRICKDIM - ray_start.z) / B.z;
+	else stepZ = 0, tDeltaZ = tMaxZ = tmax;
+
+	int last = 0;
+
+	while (current_X >= 0 && current_Y >= 0 && current_Z >= 0 && current_X < 128 && current_Y < 128 && current_Z < 128)
+	{
+		// check main grid
+		const uint o = read_imageui( grid, (int4)(current_X, current_Z, current_Y, 0) ).x;
+		if (o != 0) /* if ((o & 1) == 0) */ /* solid */
+		{
+			*dist = tmin, * N = -(float3)((last == 0) * 1, (last == 1) * 1, (last == 2) * 1);
+			return 255;
+		}
+
+		if (tMaxX < tMaxY && tMaxX < tMaxZ) current_X += stepX, tmin = tMaxX, tMaxX += tDeltaX, last = 0;
+		else if (tMaxY < tMaxZ) current_Y += stepY, tmin = tMaxY, tMaxY += tDeltaY, last = 1;
+		else current_Z += stepZ, tmin = tMaxZ, tMaxZ += tDeltaZ, last = 2;
+	}
+
+	return 0;
+}
+
+// mighty two-level grid traversal
+uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
+	__global const unsigned char* brick0, __global const unsigned char* brick1,
+	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
+{
+	// return TraceRay2( A, B, dist, N, grid, brick0, brick1, brick2, brick3, steps );
+
 	__global const unsigned char* bricks[4] = { brick0, brick1, brick2, brick3 };
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
 	const bool originOutsideGrid = A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH;
@@ -73,8 +144,8 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 			do
 			{
 				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
-				const unsigned char* page = bricks[(idx >> 28) & 3];
-				const unsigned int color = page[idx & 0xfffffff];
+				const PAYLOAD* page = (PAYLOAD*)bricks[(idx / (CHUNKSIZE / PAYLOADSIZE)) & 3];
+				const unsigned int color = page[idx & ((CHUNKSIZE / PAYLOADSIZE) - 1)];
 				if (color != 0U)
 				{
 					*dist = d, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
@@ -160,7 +231,7 @@ float3 PaniniProjection( float2 tc, const float fov, const float d )
 	return (float3)(sinPhi, tanTheta, cosPhi) * s;
 }
 
-__kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params, __read_only image3d_t grid, 
+__kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
 {
@@ -190,14 +261,26 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	{
 		// sky
 		const float3 T = (float3)(D.x, D.z, D.y);
-		const uint u = (uint)(5000 * SphericalPhi( T ) * INV2PI - 0.5f);
-		const uint v = (uint)(2500 * SphericalTheta( T ) * INVPI - 0.5f);
-		const uint idx = u + v * 5000;
-		pixel = (idx < 5000 * 2500) ? sky[idx].xyz : (float3)(1);
+		const float u = 5000 * SphericalPhi( T ) * INV2PI - 0.5f;
+		const float v = 2500 * SphericalTheta( T ) * INVPI - 0.5f;
+		const float fu = u - floor( u ), fv = v - floor( v );
+		const int iu = (int)u, iv = (int)v;
+		const uint idx1 = (iu + iv * 5000) % (5000 * 2500);
+		const uint idx2 = (iu + 1 + iv * 5000) % (5000 * 2500);
+		const uint idx3 = (iu + (iv + 1) * 5000) % (5000 * 2500);
+		const uint idx4 = (iu + 1 + (iv + 1) * 5000) % (5000 * 2500);
+		const float4 s =
+			sky[idx1] * (1 - fu) * (1 - fv) + sky[idx2] * fu * (1 - fv) +
+			sky[idx3] * (1 - fu) * fv + sky[idx4] * fu * fv;
+		pixel = s.xyz;
 	}
 	else
 	{
+	#if PAYLOADSIZE == 1
 		const float3 BRDF1 = INVPI * (float3)((voxel >> 5) * (1.0f / 7.0f), ((voxel >> 2) & 7) * (1.0f / 7.0f), (voxel & 3) * (1.0f / 3.0f));
+	#else
+		const float3 BRDF1 = INVPI * (float3)(((voxel >> 8) & 15) * (1.0f / 15.0f), ((voxel >> 4) & 15) * (1.0f / 15.0f), (voxel & 15) * (1.0f / 15.0f));
+	#endif
 	#if GIRAYS > 0
 		float3 incoming = (float3)(0, 0, 0);
 		uint seed = WangHash( column * 171 + line * 1773 + params->R0 );
@@ -214,10 +297,17 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 			{
 				// sky
 				const float3 T = (float3)(R.x, R.z, R.y);
-				const uint u = (uint)(5000 * SphericalPhi( T ) * INV2PI - 0.5f);
-				const uint v = (uint)(2500 * SphericalTheta( T ) * INVPI - 0.5f);
-				const uint idx = u + v * 5000;
-				incoming += 4 * ((idx < 5000 * 2500) ? sky[idx].xyz : (float3)(1));
+				const float u = 5000 * SphericalPhi( T ) * INV2PI - 0.5f;
+				const float v = 2500 * SphericalTheta( T ) * INVPI - 0.5f;
+				const float fu = u - floor( u ), fv = v - floor( v );
+				const uint idx1 = (u + v * 5000) % (5000 * 2500);
+				const uint idx2 = (u + 1 + v * 5000) % (5000 * 2500);
+				const uint idx3 = (u + (v + 1) * 5000) % (5000 * 2500);
+				const uint idx4 = (u + 1 + (v + 1) * 5000) % (5000 * 2500);
+				const float4 s =
+					sky[idx1] * (1 - fu) * (1 - fv) + sky[idx2] * fu * (1 - fv) +
+					sky[idx3] * (1 - fu) * fv + sky[idx4] * fu * fv;
+				incoming += 4 * s.xyz;
 			}
 			else
 			{
@@ -233,17 +323,21 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 		pixel = BRDF1 * incoming * (1.0f / GIRAYS);
 	#else
 		// hardcoded lights - image based lighting, no visibility test
-		pixel = BRDF1 * 2 * (
+	#if 1
+		pixel = BRDF1 * 1.6f * (1.0f + 0.7f * dot( N, normalize( (float3)(0.5f, 2.0f, 0.5f) ) ));
+	#else
+		pixel = BRDF1 * 2.5f * (
 			(N.x * N.x) * ((-N.x + 1) * (float3)(NX0) + (N.x + 1) * (float3)(NX1)) +
 			(N.y * N.y) * ((-N.y + 1) * (float3)(NY0) + (N.y + 1) * (float3)(NY1)) +
 			(N.z * N.z) * ((-N.z + 1) * (float3)(NZ0) + (N.z + 1) * (float3)(NZ1))
 		);
 	#endif
+	#endif
 	}
 	write_imagef( outimg, (int2)(column, line), (float4)(pixel, 1) );
 }
 
-__kernel void commit( const int taskCount, __global uint* commit, 
+__kernel void commit( const int taskCount, __global uint* commit,
 	__global uint* brick0, __global uint* brick1, __global uint* brick2, __global uint* brick3 )
 {
 	// put bricks in place
@@ -252,10 +346,10 @@ __kernel void commit( const int taskCount, __global uint* commit,
 	{
 		__global uint* bricks[4] = { brick0, brick1, brick2, brick3 };
 		int brickId = commit[task + GRIDSIZE];
-		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + task * BRICKSIZE / 4;
-		const uint offset = brickId * BRICKSIZE / 4; // __global uint* dst = brick0 + brickId * BRICKSIZE / 4;
-		uint* page = bricks[(offset >> 26) & 3];
-		for (int i = 0; i < BRICKSIZE / 4; i++) page[(offset & 0x3ffffff) + i] = src[i];
+		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + task * (BRICKSIZE * PAYLOADSIZE) / 4;
+		const uint offset = brickId * BRICKSIZE * PAYLOADSIZE / 4; // in dwords
+		uint* page = bricks[(offset / (CHUNKSIZE / 4)) & 3];
+		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) page[(offset & (CHUNKSIZE / 4 - 1)) + i] = src[i];
 	}
 }
 

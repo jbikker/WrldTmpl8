@@ -1,7 +1,8 @@
 #include "precomp.h"
 #include "bounce.h"
 
-Game* game = new Bouncer();
+Game* CreateGame() { return new Bouncer(); }
+
 uint o;
 
 // -----------------------------------------------------------
@@ -31,5 +32,25 @@ void Bouncer::Tick( float deltaTime )
 	if (ballPos.z < 33) ballPos.z = 33, ballVel.z *= -1;
 	if (ballPos.x > 1023 - 33) ballPos.x = 1023 - 33, ballVel.x *= -1;
 	if (ballPos.z > 1023 - 33) ballPos.z = 1023 - 33, ballVel.z *= -1;
-	world->Sphere( ballPos.x, ballPos.y, ballPos.z, 25, (7 << 5) + (2 << 2) + 1 );
+	world->Sphere( ballPos.x, ballPos.y, ballPos.z, 25, LIGHTRED );
+	LookAt( 300, 100, 300, (int)ballPos.x, 100, (int)ballPos.z );
+	if (GetAsyncKeyState( 'R' ))
+	{
+		ClearWorld();
+		for (int y = 0; y < 256; y++) for (int z = 0; z < 1024; z++)
+		{
+			Plot( 6, y, z, WHITE );
+			Plot( 1017, y, z, WHITE );
+		}
+		for (int x = 0; x < 1024; x++) for (int z = 0; z < 1024; z++)
+		{
+			Plot( x, 6, z, WHITE );
+			Plot( x, 257, z, WHITE );
+		}
+		for (int x = 0; x < 1024; x++) for (int y = 0; y < 256; y++)
+		{
+			Plot( x, y, 6, WHITE );
+			Plot( x, y, 1017, WHITE );
+		}
+	}
 }

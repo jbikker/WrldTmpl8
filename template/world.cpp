@@ -46,16 +46,15 @@ World::World( const uint targetID )
 	desc.image_depth = MAPDEPTH / BRICKDIM;
 	gridMap = clCreateImage( Kernel::GetContext(), CL_MEM_HOST_NO_ACCESS, &fmt, &desc, 0, 0 );
 	// create brick storage
-	brick = (uchar*)_aligned_malloc( BRICKCOUNT * BRICKSIZE, 64 );
-	for (int i = 0; i < 4; i++)
+	brick = (PAYLOAD*)_aligned_malloc( CHUNKCOUNT * CHUNKSIZE, 64 );
+	for (int i = 0; i < CHUNKCOUNT; i++)
 	{
-		assert( (BRICKCOUNT * BRICKSIZE / 4) == 4 * 64 * 1024 * 1024 /* bytes */ );
-		brickBuffer[i] = new Buffer( 64 /* dwords */ * 1024 * 1024, Buffer::DEFAULT, brick + 256 * 1024 * 1024 * i );
+		brickBuffer[i] = new Buffer( CHUNKSIZE / 4 /* dwords */, Buffer::DEFAULT, (uchar*)brick + CHUNKSIZE * i );
 		brickBuffer[i]->CopyToDevice();
 	}
 	brickInfo = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
 	// create a cyclic array for unused bricks (all of them, for now)
-	trash = new uint[BRICKCOUNT];
+	trash = (uint*)_aligned_malloc( BRICKCOUNT * 4, 64 );
 	memset( trash, 0, BRICKCOUNT * 4 );
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
 	// prepare a test world
@@ -115,7 +114,7 @@ World::~World()
 	_aligned_free( brick );
 	for (int i = 0; i < 4; i++) delete brickBuffer[i];
 	_aligned_free( brickInfo );
-	delete trash;
+	_aligned_free( trash );
 	delete screen;
 	delete paramBuffer;
 	delete sky;
@@ -128,7 +127,7 @@ World::~World()
 // ----------------------------------------------------------------------------
 void World::ForceSyncAllBricks()
 {
-	for (int i = 0; i < 4; i++) brickBuffer[i]->CopyToDevice();
+	for (int i = 0; i < CHUNKCOUNT; i++) brickBuffer[i]->CopyToDevice();
 }
 
 // World::DummyWorld: box
@@ -138,18 +137,18 @@ void World::DummyWorld()
 	Clear();
 	for (int y = 0; y < 256; y++) for (int z = 0; z < 1024; z++)
 	{
-		Set( 6, y, z, 255 );
-		Set( 1017, y, z, 255 );
+		Set( 6, y, z, WHITE );
+		Set( 1017, y, z, WHITE );
 	}
 	for (int x = 0; x < 1024; x++) for (int z = 0; z < 1024; z++)
 	{
-		Set( x, 6, z, 255 );
-		Set( x, 257, z, 255 );
+		Set( x, 6, z, WHITE );
+		Set( x, 257, z, WHITE );
 	}
 	for (int x = 0; x < 1024; x++) for (int y = 0; y < 256; y++)
 	{
-		Set( x, y, 6, 255 );
-		Set( x, y, 1017, 255 );
+		Set( x, y, 6, WHITE );
+		Set( x, y, 1017, WHITE );
 	}
 	// performance note: these coords prevent exessive brick traversal.
 }
@@ -162,6 +161,7 @@ void World::Clear()
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	memset( trash, 0, BRICKCOUNT * 4 );
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
+	trashHead = BRICKCOUNT, trashTail = 0;
 	ClearMarks();
 }
 
@@ -223,7 +223,7 @@ void World::LoadSky( const char* filename, const char* bin_name, const float sca
 		gzread( f, pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
 		gzclose( f );
 		if (scale != 1.0f) for (int i = 0; i < skySize.x * skySize.y * 3; i++) pixels[i] *= scale;
-	#if 0
+	#if 1
 		// add a checkerboard pattern
 		for (int y = 1250; y < 2500; y++) for (int x = 0; x < 5000; x++)
 		{
@@ -358,9 +358,9 @@ void World::Print( const char* text, const uint x, const uint y, const uint z, c
 	}
 }
 
-// World::LoadSprite
+// SpriteManager::LoadSprite
 // ----------------------------------------------------------------------------
-uint World::LoadSprite( const char* voxFile, bool palShift )
+uint SpriteManager::LoadSprite( const char* voxFile, bool palShift )
 {
 	// attempt to load the .vox file
 	FILE* file = fopen( voxFile, "rb" );
@@ -419,8 +419,8 @@ uint World::LoadSprite( const char* voxFile, bool palShift )
 			uint N;
 			int3 s = frame->size;
 			fread( &N, 1, 4, file );
-			frame->buffer = (uchar*)_aligned_malloc( s.x * s.y * s.z, 64 ); // B&H'21
-			memset( frame->buffer, 0, s.x * s.y * s.z );
+			frame->buffer = (PAYLOAD*)_aligned_malloc( s.x * s.y * s.z * PAYLOADSIZE, 64 ); // B&H'21
+			memset( frame->buffer, 0, s.x * s.y * s.z * PAYLOADSIZE );
 			for (uint i = 0; i < N; i++)
 			{
 				fread( &xyzi, 1, 4, file );
@@ -445,11 +445,12 @@ uint World::LoadSprite( const char* voxFile, bool palShift )
 	// finalize new sprite
 	int3 maxSize = make_int3( 0 );
 	const uint offset = palShift ? 1 : 0;
-	for (int i = 0; i < frameCount; i++)
+	for (int f = 0; f < frameCount; f++)
 	{
 		// efficient sprite rendering: B&H'21
-		SpriteFrame* frame = newSprite->frame[i];
-		std::vector<uchar4> drawList;
+		SpriteFrame* frame = newSprite->frame[f];
+		vector<uchar4> drawList;
+		vector<PAYLOAD> voxel;
 		for (int i = 0, z = 0; z < frame->size.z; z++)
 		{
 			for (int y = 0; y < frame->size.y; y++)
@@ -459,13 +460,22 @@ uint World::LoadSprite( const char* voxFile, bool palShift )
 					if (frame->buffer[i])
 					{
 						const uint c = palette[frame->buffer[i] - offset];
+					#if PAYLOADSIZE == 1
 						const uint blue = min( 3u, (((c >> 16) & 255) + 31) >> 6 );
 						const uint green = min( 7u, (((c >> 8) & 255) + 15) >> 5 );
 						const uint red = min( 7u, ((c & 255) + 15) >> 5 );
 						const uint p = (red << 5) + (green << 2) + blue;
-						const uchar v = (p == 0) ? (1 << 5) : p;
+						const PAYLOAD v = (p == 0) ? (1 << 5) : p;
+					#else
+						const uint blue = min( 15u, (((c >> 16) & 255) + 7) >> 4 );
+						const uint green = min( 15u, (((c >> 8) & 255) + 7) >> 4 );
+						const uint red = min( 15u, ((c & 255) + 7) >> 4 );
+						const uint p = (red << 8) + (green << 4) + blue;
+						const PAYLOAD v = (p == 0) ? 1 : p;
+					#endif
 						frame->buffer[i] = v;
-						drawList.push_back( make_uchar4( x, y, z, frame->buffer[i] ) );
+						drawList.push_back( make_uchar4( x, y, z, 0 ) );
+						voxel.push_back( frame->buffer[i] );
 					}
 				}
 			}
@@ -473,23 +483,26 @@ uint World::LoadSprite( const char* voxFile, bool palShift )
 		maxSize.x = max( maxSize.x, frame->size.x );
 		maxSize.y = max( maxSize.y, frame->size.y );
 		maxSize.z = max( maxSize.z, frame->size.z );
-		frame->drawList = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
-		memcpy( frame->drawList, drawList.data(), drawList.size() * sizeof( uchar4 ) );
+		frame->drawPos = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
+		frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
+		for( size_t s = drawList.size(), i = 0; i < s; i++ )
+			frame->drawPos[i] = drawList[i],
+			frame->drawVal[i] = voxel[i];
 		frame->drawListSize = (uint)drawList.size();
 	}
 	// create the backup frame for sprite movement
 	SpriteFrame* backupFrame = new SpriteFrame();
 	backupFrame->size = maxSize;
-	backupFrame->buffer = new uchar[maxSize.x * maxSize.y * maxSize.z];
+	backupFrame->buffer = new PAYLOAD[maxSize.x * maxSize.y * maxSize.z];
 	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
 	// all done, return sprite index
 	return (uint)sprite.size() - 1;
 }
 
-// World::CloneSprite
+// SpriteManager::CloneSprite
 // ----------------------------------------------------------------------------
-uint World::CloneSprite( const uint idx )
+uint SpriteManager::CloneSprite( const uint idx )
 {
 	if (idx >= sprite.size()) return 0;
 	// clone frame data, wich contain pointers to shared frame data
@@ -499,7 +512,7 @@ uint World::CloneSprite( const uint idx )
 	// clone backup frame, which will be unique per instance
 	SpriteFrame* backupFrame = new SpriteFrame();
 	backupFrame->size = sprite[idx]->backup->size;
-	backupFrame->buffer = new uchar[backupFrame->size.x * backupFrame->size.y * backupFrame->size.z];
+	backupFrame->buffer = new PAYLOAD[backupFrame->size.x * backupFrame->size.y * backupFrame->size.z];
 	newSprite->backup = backupFrame;
 	sprite.push_back( newSprite );
 	return (uint)sprite.size() - 1;
@@ -516,24 +529,33 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 	{
 		SpriteFrame* frame = new SpriteFrame();
 		frame->size = size;
-		std::vector<uchar4> drawList( voxelsPerFrame / 4 /* estimate */ );
-		frame->buffer = (uchar*)_aligned_malloc( voxelsPerFrame, 64 );
+		vector<uchar4> drawList( voxelsPerFrame / 4 /* estimate */ );
+		vector<PAYLOAD> voxel( voxelsPerFrame / 4 );
+		frame->buffer = (PAYLOAD*)_aligned_malloc( voxelsPerFrame * PAYLOADSIZE, 64 );
 		for (int x = 0; x < size.x; x++) for (int y = 0; y < size.y; y++) for (int z = 0; z < size.z; z++)
 		{
 			uint v = Get( i * size.x + x + pos.x, y + pos.y, z + pos.z );
 			frame->buffer[x + y * size.x + z * size.x * size.y] = v;
-			if (v != 0) drawList.push_back( make_uchar4( x, y, z, v ) );
+			if (v != 0) 
+			{
+				drawList.push_back( make_uchar4( x, y, z, 0 ) );
+				voxel.push_back( v );
+			}
 		}
 		frame->drawListSize = (uint)drawList.size();
-		frame->drawList = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
-		memcpy( frame->drawList, drawList.data(), drawList.size() * sizeof( uchar4 ) );
+		frame->drawPos = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
+		frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
+		for( size_t s = drawList.size(), i = 0; i < s; i++ )
+			frame->drawPos[i] = drawList[i],
+			frame->drawVal[i] = voxel[i];
 		newSprite->frame.push_back( frame );
 	}
 	// create the backup frame for sprite movement
 	SpriteFrame* backupFrame = new SpriteFrame();
 	backupFrame->size = size;
-	backupFrame->buffer = new uchar[voxelsPerFrame];
+	backupFrame->buffer = new PAYLOAD[voxelsPerFrame];
 	newSprite->backup = backupFrame;
+	auto& sprite = GetSpriteList();
 	sprite.push_back( newSprite );
 	// all done, return sprite index
 	return (uint)sprite.size() - 1;
@@ -543,6 +565,7 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 // ----------------------------------------------------------------------------
 uint World::SpriteFrameCount( const uint idx )
 {
+	auto& sprite = GetSpriteList();
 	// out of bounds checks
 	if (idx >= sprite.size()) return 0;
 	// return frame count
@@ -554,15 +577,16 @@ uint World::SpriteFrameCount( const uint idx )
 void World::EraseSprite( const uint idx )
 {
 	// restore pixels occupied by sprite at previous location
+	auto& sprite = GetSpriteList();
 	const int3 lastPos = sprite[idx]->lastPos;
 	if (lastPos.x == -9999) return;
 	const SpriteFrame* backup = sprite[idx]->backup;
 #if 1
 	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
-	const uchar4* dl = frame->drawList;
+	const uchar4* localPos = frame->drawPos;
 	for (uint i = 0; i < frame->drawListSize; i++)
 	{
-		const uchar4 v = dl[i];
+		const uchar4 v = localPos[i];
 		Set( v.x + lastPos.x, v.y + lastPos.y, v.z + lastPos.z, backup->buffer[i] );
 	}
 #else
@@ -577,6 +601,7 @@ void World::EraseSprite( const uint idx )
 void World::DrawSprite( const uint idx )
 {
 	// draw sprite at new location
+	auto& sprite = GetSpriteList();
 	const int3& pos = sprite[idx]->currPos;
 	if (pos.x != -9999)
 	{
@@ -584,12 +609,13 @@ void World::DrawSprite( const uint idx )
 		SpriteFrame* backup = sprite[idx]->backup;
 		const int3& s = backup->size = frame->size;
 	#if 1
-		const uchar4* dl = frame->drawList;
+		const uchar4* localPos = frame->drawPos;
+		const PAYLOAD* val = frame->drawVal;
 		for (uint i = 0; i < frame->drawListSize; i++)
 		{
-			const uchar4 v = dl[i];
+			const uchar4 v = localPos[i];
 			backup->buffer[i] = Get( v.x + pos.x, v.y + pos.y, v.z + pos.z );
-			Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, v.w );
+			Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, val[i] );
 		}
 	#else
 		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
@@ -608,6 +634,7 @@ void World::DrawSprite( const uint idx )
 // ----------------------------------------------------------------------------
 void World::DrawSpriteShadow( const uint idx )
 {
+	auto& sprite = GetSpriteList();
 	const int3& pos = sprite[idx]->currPos;
 	int x0 = pos.x - 12, x1 = pos.x + 12;
 	int z0 = pos.z - 12, z1 = pos.z + 12;
@@ -640,6 +667,7 @@ void World::DrawSpriteShadow( const uint idx )
 void World::RemoveSpriteShadow( const uint idx )
 {
 	// restore voxels affected by shadow
+	auto& sprite = GetSpriteList();
 	for (uint i = 0; i < sprite[idx]->shadowVoxels; i++)
 	{
 		uint4 s = sprite[idx]->preShadow[i];
@@ -652,6 +680,7 @@ void World::RemoveSpriteShadow( const uint idx )
 void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z )
 {
 	// out of bounds checks
+	auto& sprite = GetSpriteList();
 	if (idx >= sprite.size()) return;
 	// set new sprite location and frame
 	sprite[idx]->currPos = make_int3( x, y, z );
@@ -662,6 +691,7 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 void World::RemoveSprite( const uint idx )
 {
 	// move sprite to -9999 to keep it from taking CPU cycles
+	auto& sprite = GetSpriteList();
 	sprite[idx]->currPos.x = -9999;
 }
 
@@ -669,6 +699,7 @@ void World::RemoveSprite( const uint idx )
 // ----------------------------------------------------------------------------
 void World::SetSpriteFrame( const uint idx, const uint frame )
 {
+	auto& sprite = GetSpriteList();
 	if (idx >= sprite.size()) return;
 	if (frame >= sprite[idx]->frame.size()) return;
 	sprite[idx]->currFrame = frame;
@@ -679,6 +710,7 @@ void World::SetSpriteFrame( const uint idx, const uint frame )
 bool World::SpriteHit( const uint A, const uint B )
 {
 	// get the bounding boxes for the two sprites
+	auto& sprite = GetSpriteList();
 	int3 b1A = sprite[A]->currPos, b1B = sprite[B]->currPos;
 	if (b1A.x == -9999 || b1B.x == -9999) return false; // early out: at least one is inactive
 	SpriteFrame* frameA = sprite[A]->frame[sprite[A]->currFrame];
@@ -691,23 +723,22 @@ bool World::SpriteHit( const uint A, const uint B )
 	// check individual voxels
 	int3 pA = b1 - b1A, pB = b1 - b1B;
 	int3 sizeA = frameA->size, sizeB = frameB->size, sizeI = b2 - b1;
-	uchar* dA = frameA->buffer + pA.x + pA.y * sizeA.x + pA.z * sizeA.x * sizeA.y;
-	uchar* dB = frameB->buffer + pB.x + pB.y * sizeB.x + pB.z * sizeB.x * sizeB.y;
 	for (int z = 0; z < sizeI.z; z++)
 	{
+		PAYLOAD* dA = frameA->buffer + pA.x + pA.y * sizeA.x + (pA.z + z) * sizeA.x * sizeA.y;
+		PAYLOAD* dB = frameB->buffer + pB.x + pB.y * sizeB.x + (pB.z + z) * sizeB.x * sizeB.y;
 		for (int y = 0; y < sizeI.y; y++)
 		{
 			for (int x = 0; x < sizeI.x; x++) if (dA[x] * dB[x]) return true;
 			dA += sizeA.x, dB += sizeB.x;
 		}
-		dA += sizeA.x * sizeA.y, dB += sizeB.x * sizeB.y;
 	}
 	return false;
 }
 
-// World::CreateParticles
+// ParticlesManager::CreateParticles
 // ----------------------------------------------------------------------------
-uint World::CreateParticles( const uint count )
+uint ParticlesManager::CreateParticles( const uint count )
 {
 	Particles* p = new Particles( count );
 	particles.push_back( p );
@@ -718,6 +749,7 @@ uint World::CreateParticles( const uint count )
 // ----------------------------------------------------------------------------
 void World::SetParticle( const uint set, const uint idx, const uint3 pos, const uint v )
 {
+	auto& particles = GetParticlesList();
 	particles[set]->voxel[idx] = make_uint4( pos, v );
 }
 
@@ -725,6 +757,7 @@ void World::SetParticle( const uint set, const uint idx, const uint3 pos, const 
 // ----------------------------------------------------------------------------
 void World::DrawParticles( const uint set )
 {
+	auto& particles = GetParticlesList();
 	if (particles[set]->count == 0 || particles[set]->voxel[0].x == -9999) return; // inactive
 	for (uint s = particles[set]->count, i = 0; i < s; i++)
 	{
@@ -738,6 +771,7 @@ void World::DrawParticles( const uint set )
 // ----------------------------------------------------------------------------
 void World::EraseParticles( const uint set )
 {
+	auto& particles = GetParticlesList();
 	for (int s = (int)particles[set]->count, i = s - 1; i >= 0; i--)
 	{
 		const uint4 v = particles[set]->backup[i];
@@ -745,9 +779,9 @@ void World::EraseParticles( const uint set )
 	}
 }
 
-// World::LoadTile
+// TileManager::LoadTile
 // ----------------------------------------------------------------------------
-uint World::LoadTile( const char* voxFile )
+uint TileManager::LoadTile( const char* voxFile )
 {
 	tile.push_back( new Tile( voxFile ) );
 	return (uint)tile.size() - 1;
@@ -757,17 +791,18 @@ uint World::LoadTile( const char* voxFile )
 // ----------------------------------------------------------------------------
 void World::DrawTile( const uint idx, const uint x, const uint y, const uint z )
 {
+	auto& tile = GetTileList();
 	if (x >= GRIDWIDTH || y >= GRIDHEIGHT || z > GRIDDEPTH) return;
 	const uint cellIdx = x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH;
 	DrawTileVoxels( cellIdx, tile[idx]->voxels, tile[idx]->zeroes );
 }
-void World::DrawTileVoxels( const uint cellIdx, const uchar* voxels, const uint zeroes )
+void World::DrawTileVoxels( const uint cellIdx, const PAYLOAD* voxels, const uint zeroes )
 {
 	const uint g = grid[cellIdx];
 	uint brickIdx;
 	if ((g & 1) == 1) brickIdx = g >> 1; else brickIdx = NewBrick(), grid[cellIdx] = (brickIdx << 1) | 1;
 	// copy tile data to brick
-	memcpy( brick + brickIdx * BRICKSIZE, voxels, BRICKSIZE );
+	memcpy( brick + brickIdx * BRICKSIZE, voxels, BRICKSIZE * PAYLOADSIZE );
 	Mark( brickIdx );
 	brickInfo[brickIdx].zeroes = zeroes;
 }
@@ -783,9 +818,9 @@ void World::DrawTiles( const char* tileString, const uint x, const uint y, const
 	}
 }
 
-// World::LoadBigTile
+// TileManager::LoadBigTile
 // ----------------------------------------------------------------------------
-uint World::LoadBigTile( const char* voxFile )
+uint TileManager::LoadBigTile( const char* voxFile )
 {
 	bigTile.push_back( new BigTile( voxFile ) );
 	return (uint)bigTile.size() - 1;
@@ -795,6 +830,7 @@ uint World::LoadBigTile( const char* voxFile )
 // ----------------------------------------------------------------------------
 void World::DrawBigTile( const uint idx, const uint x, const uint y, const uint z )
 {
+	auto& bigTile = GetBigTileList();
 	if (x >= GRIDWIDTH / 2 || y >= GRIDHEIGHT / 2 || z > GRIDDEPTH / 2) return;
 	const uint cellIdx = x * 2 + z * 2 * GRIDWIDTH + y * 2 * GRIDWIDTH * GRIDDEPTH;
 	DrawTileVoxels( cellIdx, bigTile[idx]->tile[0].voxels, bigTile[idx]->tile[0].zeroes );
@@ -954,11 +990,13 @@ void World::Render()
 void World::Commit()
 {
 	// add the sprites and particles to the world
+	auto& sprite = GetSpriteList();
 	for (int s = (int)sprite.size(), i = 0; i < s; i++)
 	{
 		if (sprite[i]->hasShadow) DrawSpriteShadow( i );
 		DrawSprite( i );
 	}
+	auto& particles = GetParticlesList();
 	for (int s = (int)particles.size(), i = 0; i < s; i++) DrawParticles( i );
 	// make sure the previous commit completed
 	if (commitInFlight) clWaitForEvents( 1, &commitDone );
@@ -983,8 +1021,8 @@ void World::Commit()
 			const uint i = j * 32 + k;
 			if (!IsDirty( i )) continue;
 			*brickIndices++ = i; // store index of modified brick at start of commit buffer
-			StreamCopy( (__m256i*)changedBricks, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE );
-			changedBricks += BRICKSIZE, tasks++;
+			StreamCopy( (__m256i*)changedBricks, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE * PAYLOADSIZE );
+			changedBricks += BRICKSIZE * PAYLOADSIZE, tasks++;
 		}
 		ClearMarks32( j );
 		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
@@ -995,7 +1033,7 @@ void World::Commit()
 	if (tasks > 0 || firstFrame)
 	{
 		// enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
-		const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE);
+		const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE * PAYLOADSIZE);
 		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
 		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
 		size_t origin[3] = { 0, 0, 0 };
@@ -1044,8 +1082,8 @@ void World::StreamCopyMT( __m256i* dst, __m256i* src, const uint bytes )
 Tile::Tile( const char* voxFile )
 {
 	// abuse the sprite loader to get the tile in memory
-	uint spriteIdx = GetWorld()->LoadSprite( voxFile );
-	Sprite* sprite = GetWorld()->sprite[spriteIdx];
+	uint spriteIdx = SpriteManager::GetSpriteManager()->LoadSprite( voxFile );
+	Sprite* sprite = SpriteManager::GetSpriteManager()->sprite[spriteIdx];
 	// make some assumptions
 	if (sprite->frame.size() != 1) FatalError( "LoadTile( \"%s\" ):\nExpected a single frame in the tile file.", voxFile );
 	SpriteFrame* frame = sprite->frame[0];
@@ -1055,13 +1093,13 @@ Tile::Tile( const char* voxFile )
 	uint zeroCount = 0;
 	for (int i = 0; i < BRICKSIZE; i++)
 	{
-		uchar v = frame->buffer[i];
+		PAYLOAD v = frame->buffer[i];
 		voxels[i] = v;
 		if (v == 0) zeroCount++;
 	}
 	zeroes = zeroCount;
 	// remove the sprite from the world
-	GetWorld()->sprite.pop_back();
+	SpriteManager::GetSpriteManager()->sprite.pop_back();
 }
 
 // BigTile::BigTile
@@ -1069,8 +1107,8 @@ Tile::Tile( const char* voxFile )
 BigTile::BigTile( const char* voxFile )
 {
 	// abuse the sprite loader to get the tile in memory
-	uint spriteIdx = GetWorld()->LoadSprite( voxFile );
-	Sprite* sprite = GetWorld()->sprite[spriteIdx];
+	uint spriteIdx = SpriteManager::GetSpriteManager()->LoadSprite( voxFile );
+	Sprite* sprite = SpriteManager::GetSpriteManager()->sprite[spriteIdx];
 	// make some assumptions
 	if (sprite->frame.size() != 1) FatalError( "LoadTile( \"%s\" ):\nExpected a single frame in the tile file.", voxFile );
 	SpriteFrame* frame = sprite->frame[0];
@@ -1083,14 +1121,14 @@ BigTile::BigTile( const char* voxFile )
 		uint zeroCount = 0;
 		for (int z = 0; z < BRICKDIM; z++) for (int y = 0; y < BRICKDIM; y++) for (int x = 0; x < BRICKDIM; x++)
 		{
-			uchar v = frame->buffer[sx * BRICKDIM + x + (sy * BRICKDIM + y) * BRICKDIM * 2 + (sz * BRICKDIM + z) * 4 * BRICKDIM * BRICKDIM];
+			PAYLOAD v = frame->buffer[sx * BRICKDIM + x + (sy * BRICKDIM + y) * BRICKDIM * 2 + (sz * BRICKDIM + z) * 4 * BRICKDIM * BRICKDIM];
 			tile[subTile].voxels[x + y * BRICKDIM + z * BRICKDIM * BRICKDIM] = v;
 			if (v == 0) zeroCount++;
 		}
 		tile[subTile].zeroes = zeroCount;
 	}
 	// remove the sprite from the world
-	GetWorld()->sprite.pop_back();
+	SpriteManager::GetSpriteManager()->sprite.pop_back();
 	delete sprite;
 }
 
