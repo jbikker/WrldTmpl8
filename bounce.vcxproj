@@ -138,6 +138,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bounce.h" />
+    <ClInclude Include="cl\tools.h" />
+    <ClInclude Include="cl\trace.h" />
     <ClInclude Include="template\bluenoise.h" />
     <ClInclude Include="template\common.h" />
     <ClInclude Include="template\precomp.h" />

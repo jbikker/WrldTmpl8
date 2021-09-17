@@ -26,6 +26,12 @@
     <ClInclude Include="template\worldapi.h">
       <Filter>template</Filter>
     </ClInclude>
+    <ClInclude Include="cl\tools.h">
+      <Filter>template</Filter>
+    </ClInclude>
+    <ClInclude Include="cl\trace.h">
+      <Filter>template</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="cl\kernels.cl">

@@ -266,6 +266,7 @@ bool FileIsNewer( const char* file1, const char* file2 );
 bool FileExists( const char* f );
 bool RemoveFile( const char* f );
 string TextFileRead( const char* _File );
+int LineCount( const string s );
 void TextFileWrite( const string& text, const char* _File );
 string LowerCase( string s );
 

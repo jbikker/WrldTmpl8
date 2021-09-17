@@ -928,6 +928,14 @@ string TextFileRead( const char* _File )
 	return str;
 }
 
+int LineCount( const string s )
+{
+	const char* p = s.c_str();
+	int lines = 0;
+	while (*p) if (*p++ == '\n') lines++;
+	return lines;
+}
+
 void TextFileWrite( const string& text, const char* _File )
 {
 	ofstream s( _File, ios::binary );
@@ -1154,43 +1162,118 @@ void Buffer::Clear()
 // ----------------------------------------------------------------------------
 Kernel::Kernel( char* file, char* entryPoint )
 {
-	size_t size;
-	cl_int error;
+	// load a cl file
 	string csText = TextFileRead( file );
 	if (csText.size() == 0) FatalError( "File %s not found", file );
-	size_t pos;
-	int incLines = 0;
+	// expand #include directives: cl compiler doesn't support these natively
+	// warning: this simple system does not handle nested includes.
+	struct Include { int start, end; string file; } includes[64];
+	int Ninc = 0;
 	while (1)
 	{
-		pos = csText.find( "#include" );
+		// see if any #includes remain
+		size_t pos = csText.find( "#include" );
 		if (pos == string::npos) break;
+		// start of expanded source construction
 		string tmp;
-		if (pos > 0) tmp = csText.substr( 0, pos - 1 );
-		pos = csText.find( "\"" );
+		if (pos > 0) 
+			tmp = csText.substr( 0, pos - 1 ) + "\n",
+			includes[Ninc].start = LineCount( tmp ); // record first line of #include content
+		else
+			includes[Ninc].start = 0;
+		// parse filename of include file
+		pos = csText.find( "\"", pos + 1 );
 		if (pos == string::npos) FatalError( "Expected \" after #include in shader." );
 		size_t end = csText.find( "\"", pos + 1 );
 		if (end == string::npos) FatalError( "Expected second \" after #include in shader." );
 		string file = csText.substr( pos + 1, end - pos - 1 );
+		// load include file content
 		string incText = TextFileRead( file.c_str() );
-		const char* p = incText.c_str();
-		while (p) incLines++, p = strstr( p + 1, "\n" );
-		incLines -= 2;
-		tmp += incText;
-		tmp += csText.substr( end + 1, string::npos );
+		includes[Ninc].end = includes[Ninc].start + LineCount( incText );
+		includes[Ninc++].file = file;
+		if (incText.size() == 0) FatalError( "#include file not found:\n%s", file.c_str() );
+		// cleanup include file content: we get some crap first sometimes, but why?
+		int firstValidChar = 0;
+		while (incText[firstValidChar] < 0) firstValidChar++;
+		// add include file content and remainder of source to expanded source string
+		tmp += incText.substr( firstValidChar, string::npos );
+		tmp += csText.substr( end + 1, string::npos ) + "\n";
+		// repeat until no #includes left
 		csText = tmp;
 	}
+	// store expanded file
 	const char* source = csText.c_str();
-	size = strlen( source );
+#if 0
+	FILE* f = fopen( "expanded.txt", "wb" );
+	fwrite( source, 1, strlen( source ) + 1, f );
+	fclose( f );
+#endif
+	// attempt to compile the loaded and expanded source text
+	size_t size = strlen( source );
+	cl_int error;
 	program = clCreateProgramWithSource( context, 1, (const char**)&source, &size, &error );
 	CHECKCL( error );
 	error = clBuildProgram( program, 0, NULL, "-cl-fast-relaxed-math -cl-mad-enable -cl-denorms-are-zero -cl-no-signed-zeros -cl-unsafe-math-optimizations", NULL, NULL );
+	// handle errors
 	if (error != CL_SUCCESS)
 	{
+		// obtain the error log from the cl compiler
 		if (!log) log = new char[256 * 1024]; // can be quite large
 		log[0] = 0;
-		clGetProgramBuildInfo( program, getFirstDevice( context ), CL_PROGRAM_BUILD_LOG, 100 * 1024, log, NULL );
-		log[2048] = 0; // truncate very long logs
-		FatalError( log, "Build error" );
+		clGetProgramBuildInfo( program, getFirstDevice( context ), CL_PROGRAM_BUILD_LOG, 256 * 1024, log, &size );
+		// save error log for closer inspection
+		FILE* f = fopen( "errorlog.txt", "wb" );
+		fwrite( log, 1, size, f );
+		fclose( f );
+		// find and display the first error. Note: platform specific sadly; code below is for NVIDIA
+		char* error = strstr( log, ": error:" );
+		if (error)
+		{
+			int errorPos = (int)(error - log);
+			while (errorPos > 0) if (log[errorPos - 1] == '\n') break; else errorPos--;
+			// translate file and line number of error and report
+			log[errorPos + 2048] = 0;
+			int lineNr = 0, linePos = 0;
+			char* lns = strstr( log + errorPos, ">:" ), *eol;
+			if (!lns) FatalError( "unkown error text format", log + errorPos ); else
+			{
+				lns += 2;
+				while (*lns >= '0' && *lns <= '9') lineNr = lineNr * 10 + (*lns++ - '0');
+				lns++; // proceed to line number
+				while (*lns >= '0' && *lns <= '9') linePos = linePos * 10 + (*lns++ - '0');
+				lns += 9; // proceed to error message
+				eol = lns;
+				while (*eol != '\n' && *eol > 0) eol++;
+				*eol = 0;
+				lineNr--; // we count from 0 instead of 1
+				// adjust file and linenr based on include file data
+				string errorFile = file;
+				for( int i = Ninc - 1; i >= 0; i-- )
+				{
+					if (lineNr > includes[i].end) 
+					{
+						for( int j = 0; j <= i; j++ ) lineNr -= includes[j].end - includes[j].start;
+						break;
+					}
+					else if (lineNr > includes[i].start) 
+					{
+						errorFile = includes[i].file;
+						lineNr -= includes[i].start;
+						break;
+					}
+				}
+				// present error message
+				char t[1024];
+				sprintf( t, "file [%s], line [%i], pos [%i]:\n%s", errorFile.c_str(), lineNr + 1, linePos, lns );
+				FatalError( t, "Build error" );
+			}
+		}
+		else
+		{
+			// error string has unknown format; just dump it to a window
+			log[2048] = 0; // truncate very long logs
+			FatalError( log, "Build error" );
+		}
 	}
 	kernel = clCreateKernel( program, entryPoint, &error );
 	if (kernel == 0) FatalError( "clCreateKernel failed: entry point not found." );
