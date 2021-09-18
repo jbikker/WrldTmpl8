@@ -61,3 +61,45 @@ float3 PaniniProjection( float2 tc, const float fov, const float d )
 	const float s = native_rsqrt( 1 + tanTheta * tanTheta );
 	return (float3)(sinPhi, tanTheta, cosPhi) * s;
 }
+
+// produce a camera ray direction for a position in screen space
+float3 GenerateCameraRay( const float2 pixelPos, __constant struct RenderParams* params )
+{
+	const float2 uv = (float2)(pixelPos.x * params->oneOverRes.x, pixelPos.y * params->oneOverRes.y);
+#if PANINI
+	const float3 V = PaniniProjection( (float2)(uv.x * 2 - 1, (uv.y * 2 - 1) * ((float)SCRHEIGHT / SCRWIDTH)), PI / 5, 0.15f );
+	// multiply by improvised camera matrix
+	return V.z * normalize( (params->p1 + params->p2) * 0.5f - params->E ) +
+		V.x * normalize( params->p1 - params->p0 ) + V.y * normalize( params->p2 - params->p0 );
+#else
+	const float3 P = params->p0 + (params->p1 - params->p0) * uv.x + (params->p2 - params->p0) * uv.y;
+	return normalize( P - params->E );
+#endif
+}
+
+// sample the HDR sky dome texture (bilinear)
+float3 SampleSky( const float3 T, __global float4* sky )
+{
+	const float u = 5000 * SphericalPhi( T ) * INV2PI - 0.5f;
+	const float v = 2500 * SphericalTheta( T ) * INVPI - 0.5f;
+	const float fu = u - floor( u ), fv = v - floor( v );
+	const int iu = (int)u, iv = (int)v;
+	const uint idx1 = (iu + iv * 5000) % (5000 * 2500);
+	const uint idx2 = (iu + 1 + iv * 5000) % (5000 * 2500);
+	const uint idx3 = (iu + (iv + 1) * 5000) % (5000 * 2500);
+	const uint idx4 = (iu + 1 + (iv + 1) * 5000) % (5000 * 2500);
+	const float4 s =
+		sky[idx1] * (1 - fu) * (1 - fv) + sky[idx2] * fu * (1 - fv) +
+		sky[idx3] * (1 - fu) * fv + sky[idx4] * fu * fv;
+	return s.xyz;
+}
+
+// convert a voxel color to floating point rgb
+float3 ToFloatRGB( const uint v )
+{
+#if PAYLOADSIZE == 1
+	return (float3)((v >> 5) * (1.0f / 7.0f), ((v >> 2) & 7) * (1.0f / 7.0f), (v & 3) * (1.0f / 3.0f));
+#else
+	return (float3)(((v >> 8) & 15) * (1.0f / 15.0f), ((v >> 4) & 15) * (1.0f / 15.0f), (v & 15) * (1.0f / 15.0f));
+#endif
+}
