@@ -44,7 +44,12 @@ bool rayBoxIntersection( float4 O, float4 rD, float* tmin, float* tmax )
 }
 
 // refactored two-level grid traversal
-uint TraceRay2( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
+uint TraceRay2( float4 A, const float4 B, float* dist, float3* N,
+#if GRID_IN_3DIMAGE == 1
+	__read_only image3d_t grid,
+#else
+	__global const unsigned int* grid,
+#endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
 {
@@ -77,7 +82,11 @@ uint TraceRay2( float4 A, const float4 B, float* dist, float3* N, __read_only im
 	while (current_X >= 0 && current_Y >= 0 && current_Z >= 0 && current_X < 128 && current_Y < 128 && current_Z < 128)
 	{
 		// check main grid
+	#if GRID_IN_3DIMAGE == 1
 		const uint o = read_imageui( grid, (int4)(current_X, current_Z, current_Y, 0) ).x;
+	#else
+		const uint o = grid[current_X + (current_Z << 7) + (current_Y << 14)]; // verify
+	#endif
 		if (o != 0) /* if ((o & 1) == 0) */ /* solid */
 		{
 			*dist = tmin, * N = -(float3)((last == 0) * 1, (last == 1) * 1, (last == 2) * 1);
@@ -93,7 +102,12 @@ uint TraceRay2( float4 A, const float4 B, float* dist, float3* N, __read_only im
 }
 
 // mighty two-level grid traversal
-uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
+uint TraceRay( float4 A, const float4 B, float* dist, float3* N,
+#if GRID_IN_3DIMAGE == 1
+	__read_only image3d_t grid,
+#else
+	__global const unsigned int* grid,
+#endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
 {
@@ -119,32 +133,44 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 	float tmy = ((pos.y & BPMY) + ((bits >> (13 - BDIMLOG2)) & (1 << BDIMLOG2)) - A.y) * rV.y;
 	float tmz = ((pos.z & BPMZ) + ((bits >> (21 - BDIMLOG2)) & (1 << BDIMLOG2)) - A.z) * rV.z, t = 0;
 	const float tdx = DIR_X * rV.x, tdy = DIR_Y * rV.y, tdz = DIR_Z * rV.z;
-	uint last = 0;
+	uint last = 0, o = 0, oo;
 	while (true)
 	{
 		// check main grid
-		const uint o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0) ).x;
-		if (o != 0) if ((o & 1) == 0) /* solid */
+	#if GRID_IN_3DIMAGE == 1
+	#if CELLSKIPPING == 1
+		if (o & (1 << 30)) o = oo; else 
+	#endif
+		o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0) ).x;
+	#else
+	#if CELLSKIPPING == 1
+		if (o & (1 << 30)) o = oo; else 
+	#endif
+		o = grid[pos.x / BRICKDIM + ((pos.z / BRICKDIM) << 7) + ((pos.y / BRICKDIM) << 14)];
+	#endif
+		oo = o & 0xffffff;
+		if (oo != 0) if ((oo & 1) == 0) /* solid */
 		{
 			*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
-			return o >> 1;
+			return oo >> 1;
 		}
 		else // brick
 		{
 			const float4 I = A + V * t;
 			uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) +
-					 (clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) +
-					  clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
+				(clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) +
+				clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK ), lp = p + 1;
 			const uint pn = p & TOPMASK3;
 			float dmx = (float)((p >> 20) + OFFS_X - A.x) * rV.x;
 			float dmy = (float)(((p >> 10) & 1023) + OFFS_Y - A.y) * rV.y;
 			float dmz = (float)((p & 1023) + OFFS_Z - A.z) * rV.z, d = t;
+			const PAYLOAD* page;
 			do
 			{
-				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
-				const PAYLOAD* page = (PAYLOAD*)bricks[(idx / (CHUNKSIZE / PAYLOADSIZE)) & 3];
+				const uint idx = (oo >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
+				if (p != lp) page = (PAYLOAD*)bricks[(idx / (CHUNKSIZE / PAYLOADSIZE)) & 3], lp = p;
 				const unsigned int color = page[idx & ((CHUNKSIZE / PAYLOADSIZE) - 1)];
-				if (color != 0U)
+				if (color)
 				{
 					*dist = d, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
 					return color;

@@ -13,6 +13,7 @@ uint Read( const int3 pos );
 uint Read( const uint3 pos );
 void Sphere( const float x, const float y, const float z, const float r, const uint c );
 void Sphere( const float3 pos, const float r, const uint c );
+void Sphere( const int x, const int y, const int z, const int r, const uint c );
 void Box( const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint c );
 void Box( const int3 pos1, const int3 pos2, const uint c );
 void Copy( const int3 s1, const int3 s2, const int3 D );
@@ -78,5 +79,6 @@ bool IsOccluded( const float3 P1, const float3 P2 );
 float Trace( const float3 P1, const float3 P2 );
 uint RGB32to8( const uint c );
 uint BGR32to8( const uint c );
+float GetRenderTime();
 
 // EOF

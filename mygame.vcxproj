@@ -134,6 +134,8 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="cl\tools.cl" />
+    <ClInclude Include="cl\trace.cl" />
     <ClInclude Include="mygame.h" />
     <ClInclude Include="template\bluenoise.h" />
     <ClInclude Include="template\common.h" />

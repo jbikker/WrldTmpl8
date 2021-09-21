@@ -34,6 +34,7 @@ World::World( const uint targetID )
 	if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
 	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize, 0, 0 );
 	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
+#if GRID_IN_3DIMAGE == 1
 	// store top-level grid in a 3D texture
 	cl_image_format fmt;
 	fmt.image_channel_order = CL_R;
@@ -45,6 +46,9 @@ World::World( const uint targetID )
 	desc.image_height = MAPHEIGHT / BRICKDIM;
 	desc.image_depth = MAPDEPTH / BRICKDIM;
 	gridMap = clCreateImage( Kernel::GetContext(), CL_MEM_HOST_NO_ACCESS, &fmt, &desc, 0, 0 );
+#else
+	gridMap = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_WRITE, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 0, 0 );
+#endif
 	// create brick storage
 	brick = (PAYLOAD*)_aligned_malloc( CHUNKCOUNT * CHUNKSIZE, 64 );
 	for (int i = 0; i < CHUNKCOUNT; i++)
@@ -73,6 +77,10 @@ World::World( const uint targetID )
 	screen = new Buffer( targetID, Buffer::TARGET );
 	renderer = new Kernel( "cl/kernels.cl", "render" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
+#if CELLSKIPPING == 1
+	hermitFinder = new Kernel( renderer->GetProgram(), "findHermits" );
+	hermitFinder->SetArgument( 0, &devmem );
+#endif
 	renderer->SetArgument( 0, screen );
 	renderer->SetArgument( 1, paramBuffer );
 	renderer->SetArgument( 2, &gridMap );
@@ -283,7 +291,7 @@ void World::LoadSky( const char* filename, const char* bin_name, const float sca
 		f.write( (char*)&skySize.y, sizeof( skySize.y ) );
 		f.write( (char*)pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
 	#endif
-		}
+	}
 	// convert to float4
 	float4* pixel4 = new float4[skySize.x * skySize.y];
 	for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++)
@@ -485,7 +493,7 @@ uint SpriteManager::LoadSprite( const char* voxFile, bool palShift )
 		maxSize.z = max( maxSize.z, frame->size.z );
 		frame->drawPos = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
 		frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
-		for( size_t s = drawList.size(), i = 0; i < s; i++ )
+		for (size_t s = drawList.size(), i = 0; i < s; i++)
 			frame->drawPos[i] = drawList[i],
 			frame->drawVal[i] = voxel[i];
 		frame->drawListSize = (uint)drawList.size();
@@ -536,7 +544,7 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 		{
 			uint v = Get( i * size.x + x + pos.x, y + pos.y, z + pos.z );
 			frame->buffer[x + y * size.x + z * size.x * size.y] = v;
-			if (v != 0) 
+			if (v != 0)
 			{
 				drawList.push_back( make_uchar4( x, y, z, 0 ) );
 				voxel.push_back( v );
@@ -545,7 +553,7 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 		frame->drawListSize = (uint)drawList.size();
 		frame->drawPos = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
 		frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
-		for( size_t s = drawList.size(), i = 0; i < s; i++ )
+		for (size_t s = drawList.size(), i = 0; i < s; i++)
 			frame->drawPos[i] = drawList[i],
 			frame->drawVal[i] = voxel[i];
 		newSprite->frame.push_back( frame );
@@ -982,7 +990,7 @@ void World::Render()
 	}
 	// get render parameters to GPU and invoke kernel asynchronously
 	paramBuffer->CopyToDevice( false );
-	renderer->Run( screen, make_int2( 32, 4 ) );
+	renderer->Run( screen, make_int2( 32, 4 ), 0, &renderDone );
 }
 
 // World::Commit
@@ -1027,18 +1035,36 @@ void World::Commit()
 		ClearMarks32( j );
 		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
 	}
-	// copy top-level grid to start of pinned buffer in preparation of final transfer
-	if (tasks > 0 || firstFrame) StreamCopyMT( (__m256i*)pinnedMemPtr, (__m256i*)grid, gridSize );
 	// asynchroneously copy the CPU data to the GPU via the commit buffer
 	if (tasks > 0 || firstFrame)
 	{
+		// copy top-level grid to start of pinned buffer in preparation of final transfer
+		StreamCopyMT( (__m256i*)pinnedMemPtr, (__m256i*)grid, gridSize );
 		// enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
 		const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE * PAYLOADSIZE);
 		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
+	#if CELLSKIPPING == 1
+		// find cells surrounded by empty cells
+		const size_t ws = 128 * 128 * 128;
+		const size_t ls = 128;
+		clEnqueueNDRangeKernel( Kernel::GetQueue2(), hermitFinder->GetKernel(), 1, 0, &ws, &ls, 0, 0, &hermitDone );
+	#if 0
+		clWaitForEvents( 1, &hermitDone );
+		cl_ulong hermitStart = 0, hermitEnd = 0;
+		clGetEventProfilingInfo( hermitDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &hermitStart, 0 );
+		clGetEventProfilingInfo( hermitDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &hermitEnd, 0 );
+		unsigned long duration = (unsigned long)(hermitEnd - hermitStart); // in nanoseconds
+		printf( "hermits detected in %5.2fms\n", duration / 1000000000.0f );
+	#endif
+	#endif
+	#if GRID_IN_3DIMAGE == 1
 		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
 		size_t origin[3] = { 0, 0, 0 };
 		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
 		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
+	#else
+		clEnqueueCopyBuffer( Kernel::GetQueue2(), devmem, gridMap, 0, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 0, 0, &copyDone );
+	#endif
 		copyInFlight = true;	// next render should wait for this commit to complete
 		firstFrame = false;		// next frame is not the first frame
 	}
@@ -1050,6 +1076,18 @@ void World::Commit()
 		EraseSprite( i );
 		if (sprite[i]->hasShadow) RemoveSpriteShadow( i );
 	}
+	// at this point, rendering *must* be done; let's make sure
+	cl_int renderStatus;
+	clGetEventInfo( renderDone, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof( cl_int ), &renderStatus, 0 );
+	if (!renderDone) printf( "didn't see that coming.\n" );
+	clWaitForEvents( 1, &renderDone );
+	// profiling: https://stackoverflow.com/questions/23272170/opencl-measure-kernels-time
+	cl_ulong renderStart = 0;
+	cl_ulong renderEnd = 0;
+	clGetEventProfilingInfo( renderDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &renderStart, 0 );
+	clGetEventProfilingInfo( renderDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &renderEnd, 0 );
+	unsigned long duration = (unsigned long)(renderEnd - renderStart); // in nanoseconds
+	renderTime = duration / 1000000000.0f;
 }
 
 // World::StreamCopyMT

@@ -177,6 +177,7 @@ public:
 	// render flow
 	void Commit();
 	void Render();
+	float GetRenderTime() { return renderTime; }
 	// high-level voxel access
 	void Sphere( const float x, const float y, const float z, const float r, const uint c );
 	void HDisc( const float x, const float y, const float z, const float r, const uint c );
@@ -420,13 +421,18 @@ private:
 	int2 skySize;						// size of the skydome bitmap
 	RenderParams params;				// CPU-side copy of the renderer parameters
 	Kernel* renderer, * committer;		// render kernel and commit kernel
+#if CELLSKIPPING == 1
+	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
+	cl_event hermitDone;				// for profiling
+#endif
 	cl_event copyDone, commitDone;		// events for queue synchronization
 	cl_event renderDone;				// event used for profiling
+	float renderTime;					// render time for the previous frame (in seconds)
 	uint tasks = 0;						// number of changed bricks, to be passed to commit kernel
 	bool copyInFlight = false;			// flag for skipping async copy on first iteration
 	bool commitInFlight = false;		// flag to make next commit wait for previous to complete
 	cl_mem devmem = 0;					// device-side commit buffer
-	cl_mem gridMap;						// host-side 3D image for top-level
+	cl_mem gridMap;						// device-side 3D image or buffer for top-level
 	Surface* font;						// bitmap font for print command
 	bool firstFrame = true;				// for doing things in the first frame
 };

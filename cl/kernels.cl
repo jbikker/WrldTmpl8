@@ -1,14 +1,19 @@
 #include "template/common.h"
-#include "cl/trace.h"
-#include "cl/tools.h"
+#include "cl/trace.cl"
+#include "cl/tools.cl"
 
-float3 render_whitted( const float2 screenPos, __constant struct RenderParams* params, __read_only image3d_t grid,
+float3 render_whitted( const float2 screenPos, __constant struct RenderParams* params,
+#if GRID_IN_3DIMAGE == 1
+	__read_only image3d_t grid,
+#else
+	__global const unsigned int* grid,
+#endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
 {
 	// basic AA
-	float3 pixel  = (float3)(0);
-	for( int u = 0; u < 3; u++ ) for( int v = 0; v < 3; v++ )
+	float3 pixel = (float3)(0);
+	for (int u = 0; u < AA_SAMPLES; u++) for (int v = 0; v < AA_SAMPLES; v++)
 	{
 		// trace primary ray
 		float dist;
@@ -18,12 +23,17 @@ float3 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 		// simple hardcoded directional lighting using arbitrary unit vector
 		if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky );
 		const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
-		pixel += BRDF1 * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ) );
+		pixel += BRDF1 * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
 	}
-	return pixel * (1.0f / 9.0f);
+	return pixel * (1.0f / (AA_SAMPLES * AA_SAMPLES));
 }
 
-float3 render_gi( const float2 screenPos, __constant struct RenderParams* params, __read_only image3d_t grid,
+float3 render_gi( const float2 screenPos, __constant struct RenderParams* params,
+#if GRID_IN_3DIMAGE == 1
+	__read_only image3d_t grid,
+#else
+	__global const unsigned int* grid,
+#endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
 {
@@ -49,12 +59,17 @@ float3 render_gi( const float2 screenPos, __constant struct RenderParams* params
 		float dist2;
 		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 /* cap on GI ray length */ );
 		if (voxel2 == 0) incoming += 8 * SampleSky( (float)(R.x, R.z, R.y), sky ); else /* secondary hit */
-			incoming += INVPI * ToFloatRGB( voxel2 ) * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ) );
+			incoming += INVPI * ToFloatRGB( voxel2 ) * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
 	}
 	return BRDF1 * incoming * (1.0f / GIRAYS);
 }
 
-__kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params, __read_only image3d_t grid,
+__kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
+#if GRID_IN_3DIMAGE == 1
+	__read_only image3d_t grid,
+#else
+	__global const unsigned int* grid,
+#endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
 {
@@ -62,9 +77,9 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	const int x = get_global_id( 0 );
 	const int y = get_global_id( 1 );
 #if GIRAYS == 0
-	const float3 pixel = render_whitted( (float2)(x,y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+	const float3 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
 #else
-	const float3 pixel = render_gi( (float2)(x,y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+	const float3 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
 #endif
 	write_imagef( outimg, (int2)(x, y), (float4)(pixel, 1) );
 }
@@ -84,3 +99,22 @@ __kernel void commit( const int taskCount, __global uint* commit,
 		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) page[(offset & (CHUNKSIZE / 4 - 1)) + i] = src[i];
 	}
 }
+
+#if CELLSKIPPING == 1
+
+__kernel void findHermits( __global unsigned int* grid )
+{
+	const int task = get_global_id( 0 );
+	const int x = task & 127;
+	const int y = (task >> 7) & 127;
+	const int z = (task >> 14) & 127;
+	if (x < 1 || y < 1 || z < 1 || x > 126 || y > 126 || z > 126) return; // skip edges
+	// count empty cells in a 3x3x3 cube
+	int empty = 0;
+	for( int u = -1; u <= 1; u++ ) for( int v = -1; v <= 1; v++ ) for( int w = -1; w <= 1; w++ )
+		if ((grid[task + u + v * 128 + w * 128 * 128] & 0xffffff) == 0) empty++;
+	// if they're all empty, this cell allows skipping
+	if (empty == 27) grid[task] |= 1 << 30;
+}
+
+#endif

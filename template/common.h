@@ -19,7 +19,7 @@
 #define BRICKDIM	8		// brick dimensions
 #define BDIMLOG2	3		// must be log2(BRICKDIM)
 #define MAXCOMMITS	8192	// maximum number of bricks that can be committed per frame
-#if 0
+#if 1
 // 8-bit voxels: RGB332
 #define VOXEL8
 #define PAYLOAD unsigned char
@@ -36,6 +36,9 @@
 
 // Panini projection, http://tksharpless.net/vedutismo/Pannini/panini.pdf via https://www.shadertoy.com/view/Wt3fzB
 #define PANINI		0
+
+// MSAA
+#define AA_SAMPLES	3	// note: will be squared
 
 // some useful color names
 #ifdef VOXEL8
@@ -92,6 +95,10 @@ struct RenderParams
 #define BRICKCOMMITSIZE	(MAXCOMMITS * BRICKSIZE * PAYLOADSIZE + MAXCOMMITS * 4 /* bytes */)
 #define CHUNKCOUNT	4
 #define CHUNKSIZE	((BRICKCOUNT * BRICKSIZE * PAYLOADSIZE) / CHUNKCOUNT)
+
+// experimental
+#define GRID_IN_3DIMAGE	1 // slightly faster
+#define CELLSKIPPING	0 // take larger steps when possible
 
 // constants
 #define PI			3.14159265358979323846264f

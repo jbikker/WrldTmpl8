@@ -55,6 +55,10 @@ void Sphere( const float3 pos, const float r, const uint c )
 {
 	world->Sphere( pos.x, pos.y, pos.z, r, c );
 }
+void Sphere( const int x, const int y, const int z, const int r, const uint c )
+{
+	world->Sphere( (float)x, (float)y, (float)z, (float)r, c );
+}
 void Box(  const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint c )
 {
 	for( int y = y1; y < y2; y++ ) for( int z = z1; z < z2; z++ ) for( int x = x1; x < x2; x++ ) Plot( x, y, z, c );
@@ -240,15 +244,9 @@ float Trace( const float3 P1, const float3 P2 )
 	return dist;
 }
 
-uint RGB32to8( const uint c )
-{ 
-	return ((c >> 6) & 3) + (((c >> 13) & 7) << 2) + (((c >> 21) & 7) << 5); 
-}
-
-uint BGR32to8( const uint c )
-{ 
-	return (((c >> 5) & 7) << 5) + (((c >> 13) & 7) << 2) + ((c >> 22) & 3); 
-}
+uint RGB32to8( const uint c ) { return ((c >> 6) & 3) + (((c >> 13) & 7) << 2) + (((c >> 21) & 7) << 5); }
+uint BGR32to8( const uint c ) { return (((c >> 5) & 7) << 5) + (((c >> 13) & 7) << 2) + ((c >> 22) & 3); }
+float GetRenderTime() { return world->GetRenderTime(); } 
 
 // GLFW callbacks
 void InitRenderTarget( int w, int h )
@@ -1355,10 +1353,10 @@ bool Kernel::InitCL()
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_VERSION, 1024, &device_platform, NULL );
 	printf( "Device # %u, %s (%s)\n", deviceUsed, device_string, device_platform );
 	// create a command-queue
-	queue = clCreateCommandQueue( context, devices[deviceUsed], 0 /* or CL_QUEUE_PROFILING_ENABLE */, &error );
+	queue = clCreateCommandQueue( context, devices[deviceUsed], CL_QUEUE_PROFILING_ENABLE, &error );
 	if (!CHECKCL( error )) return false;
 	// create a second command queue for asynchronous copies
-	queue2 = clCreateCommandQueue( context, devices[deviceUsed], 0 /* or CL_QUEUE_PROFILING_ENABLE */, &error );
+	queue2 = clCreateCommandQueue( context, devices[deviceUsed], CL_QUEUE_PROFILING_ENABLE, &error );
 	if (!CHECKCL( error )) return false;
 	// cleanup
 	delete devices;

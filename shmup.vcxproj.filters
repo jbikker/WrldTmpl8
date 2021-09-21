@@ -29,21 +29,30 @@
     <ClInclude Include="lib\stb_image.h">
       <Filter>template</Filter>
     </ClInclude>
+    <ClInclude Include="cl\trace.cl">
+      <Filter>template\cl</Filter>
+    </ClInclude>
+    <ClInclude Include="cl\tools.cl">
+      <Filter>template\cl</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="cl\kernels.cl">
-      <Filter>template</Filter>
-    </None>
     <None Include="template\LICENSE">
       <Filter>template</Filter>
     </None>
     <None Include="README.md">
       <Filter>template</Filter>
     </None>
+    <None Include="cl\kernels.cl">
+      <Filter>template\cl</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="template">
       <UniqueIdentifier>{2956f6c3-2de8-4af3-909a-a1eaf84419ca}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="template\cl">
+      <UniqueIdentifier>{aafdd7e9-47d0-482b-8865-6ee85cbafaeb}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
