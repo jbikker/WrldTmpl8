@@ -55,10 +55,6 @@ void Sphere( const float3 pos, const float r, const uint c )
 {
 	world->Sphere( pos.x, pos.y, pos.z, r, c );
 }
-void Sphere( const int x, const int y, const int z, const int r, const uint c )
-{
-	world->Sphere( (float)x, (float)y, (float)z, (float)r, c );
-}
 void Box(  const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint c )
 {
 	for( int y = y1; y < y2; y++ ) for( int z = z1; z < z2; z++ ) for( int x = x1; x < x2; x++ ) Plot( x, y, z, c );
@@ -303,7 +299,7 @@ void main()
 	glfwSetCharCallback( window, CharEventCallback );
 	// initialize GLAD
 	if (!gladLoadGLLoader( (GLADloadproc)glfwGetProcAddress )) FatalError( "gladLoadGLLoader failed." );
-	glfwSwapInterval( 1 );
+	glfwSwapInterval( 0 );
 	// prepare OpenGL state
 	glDisable( GL_DEPTH_TEST );
 	glDisable( GL_CULL_FACE );
@@ -1262,7 +1258,7 @@ Kernel::Kernel( char* file, char* entryPoint )
 				}
 				// present error message
 				char t[1024];
-				sprintf( t, "file [%s], line [%i], pos [%i]:\n%s", errorFile.c_str(), lineNr + 1, linePos, lns );
+				sprintf( t, "file %s, line %i, pos %i:\n%s", errorFile.c_str(), lineNr + 1, linePos, lns );
 				FatalError( t, "Build error" );
 			}
 		}
