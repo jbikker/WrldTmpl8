@@ -42,18 +42,19 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
 		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
 	}
-	uint pos = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
+	uint p = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
 		clamp( (uint)A.z >> 3, 0u, 127u );
 	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
-	float4 tm = ((float4)( ((pos >> 20) & 127) + ((bits >> 5) & 1), ((pos >> 10) & 127) + ((bits >> 13) & 1),
-		(pos & 127) + ((bits >> 21) & 1), 0 ) - A * 0.125f) * rV;
+	float4 tm = ((float4)( ((p >> 20) & 127) + ((bits >> 5) & 1), ((p >> 10) & 127) + ((bits >> 13) & 1),
+		(p & 127) + ((bits >> 21) & 1), 0 ) - A * 0.125f) * rV;
 	float t = 0;
 	const float4 td = (float4)( DIR_X, DIR_Y, DIR_Z, 0 ) * rV;
-	uint last = 0;
+	uint last = 0, pn = 0, posMask = 0xf80e0380;
 	do
 	{
-		// check main grid
-		uint o = read_imageui( grid, (int4)(pos >> 20, pos & 127, (pos >> 10) & 127, 0) ).x;
+		// fetch brick from top grid
+		uint o = read_imageui( grid, (int4)(p >> 20, p & 127, (p >> 10) & 127, 0) ).x;
+		if (!--steps) break;
 		if (o != 0) if ((o & 1) == 0) /* solid */
 		{
 			*dist = t * 8.0f, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
@@ -61,15 +62,21 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		}
 		else // brick
 		{
-			float t_ = t;
+			// backup top-grid traversal state
+			const float t_ = t;
+			const float4 tm_ = tm;
+			const uint p_ = p;
+			// intialize brick traversal
 			t *= 8.0f;
 			const float4 I = A + V * t;
-			uint p = (clamp( (uint)I.x, pos >> 17, (pos >> 17) + 7 ) << 20) +
-				(clamp( (uint)I.y, (pos >> 7) & 1023, ((pos >> 7) & 1023) + 7 ) << 10) +
-				clamp( (uint)I.z, (pos << 3) & 1023, ((pos << 3) & 1023) + 7 ), lp = p + 1;
-			const uint pn = p & TOPMASK3;
-			float4 dm = ((float4)( (p >> 20) + OFFS_X, ((p >> 10) & 1023) + OFFS_Y, (p & 1023) + OFFS_Z, 0 ) - A) * rV;
+			p = (clamp( (uint)I.x, p >> 17, (p >> 17) + 7 ) << 20) +
+				(clamp( (uint)I.y, (p >> 7) & 1023, ((p >> 7) & 1023) + 7 ) << 10) +
+				clamp( (uint)I.z, (p << 3) & 1023, ((p << 3) & 1023) + 7 );
+			uint lp = p + 1;
+			pn = p & TOPMASK3, posMask = TOPMASK3;
+			tm = ((float4)( (p >> 20) + OFFS_X, ((p >> 10) & 1023) + OFFS_Y, (p & 1023) + OFFS_Z, 0 ) - A) * rV;
 			const PAYLOAD* page;
+			// traverse brick
 			do
 			{
 				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
@@ -80,19 +87,19 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 					*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
 					return color;
 				}
-				t = min( dm.x, min( dm.y, dm.z ) );
-				if (t == dm.x) dm.x += td.x, p += DIR_X << 20, last = 0;
-				if (t == dm.y) dm.y += td.y, p += DIR_Y << 10, last = 1;
-				if (t == dm.z) dm.z += td.z, p += DIR_Z, last = 2;
-			} while ((p & TOPMASK3) == pn);
-			t = t_;
+				t = min( tm.x, min( tm.y, tm.z ) );
+				if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
+				if (t == tm.y) tm.y += td.y, p += DIR_Y << 10, last = 1;
+				if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
+			} while ((p & posMask) == pn);
+			// restore top-grid traversal state
+			t = t_, tm = tm_, pn = 0, p = p_, posMask = 0xf80e0380;
 		}
-		if (!--steps) break;
 		t = min( tm.x, min( tm.y, tm.z ) );
-		if (t == tm.x) tm.x += td.x, pos += DIR_X << 20, last = 0;
-		if (t == tm.y) tm.y += td.y, pos += DIR_Y << 10, last = 1;
-		if (t == tm.z) tm.z += td.z, pos += DIR_Z, last = 2;
-	} while (!(pos & 0xf80e0380));
+		if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
+		if (t == tm.y) tm.y += td.y, p += DIR_Y << 10, last = 1;
+		if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
+	} while ((p & posMask) == pn);
 	return 0U;
 }
 
