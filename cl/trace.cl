@@ -1,5 +1,4 @@
 // internal stuff
-#define dot3(A,B)	A.x*B.x+A.y*B.y+A.z*B.z		// used in case A or B is stored in a vec4
 #define OFFS_X		((bits >> 5) & 1)			// extract grid plane offset over x (0 or 1)
 #define OFFS_Y		((bits >> 13) & 1)			// extract grid plane offset over y (0 or 1)
 #define OFFS_Z		(bits >> 21)				// extract grid plane offset over z (0 or 1)
@@ -23,6 +22,84 @@ float4 FixZeroDeltas( float4 V )
 	return V;
 }
 
+#if 1
+
+// mighty two-level grid traversal
+uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
+	__global const unsigned char* brick0, __global const unsigned char* brick1,
+	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
+{
+	__global const unsigned char* bricks[4] = { brick0, brick1, brick2, brick3 };
+	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
+	const bool originOutsideGrid = A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH;
+	if (steps == 999999 && originOutsideGrid)
+	{
+		// use slab test to clip ray origin against scene AABB
+		const float tx1 = -A.x * rV.x, tx2 = (MAPWIDTH - A.x) * rV.x;
+		float tmin = min( tx1, tx2 ), tmax = max( tx1, tx2 );
+		const float ty1 = -A.y * rV.y, ty2 = (MAPHEIGHT - A.y) * rV.y;
+		tmin = max( tmin, min( ty1, ty2 ) ), tmax = min( tmax, max( ty1, ty2 ) );
+		const float tz1 = -A.z * rV.z, tz2 = (MAPDEPTH - A.z) * rV.z;
+		tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
+		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
+	}
+	uint tp = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
+		clamp( (uint)A.z >> 3, 0u, 127u );
+	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
+	float4 tm = ((float4)(((tp >> 20) & 127) + ((bits >> 5) & 1), ((tp >> 10) & 127) + ((bits >> 13) & 1),
+		(tp & 127) + ((bits >> 21) & 1), 0) - A * 0.125f) * rV;
+	float t = 0;
+	const float4 td = (float4)(DIR_X, DIR_Y, DIR_Z, 0) * rV;
+	uint last = 0;
+	do
+	{
+		// fetch brick from top grid
+		uint o = read_imageui( grid, (int4)(tp >> 20, tp & 127, (tp >> 10) & 127, 0) ).x;
+		if (!--steps) break;
+		if (o != 0) if ((o & 1) == 0) /* solid */
+		{
+			*dist = t * 8.0f, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+			return o >> 1;
+		}
+		else // brick
+		{
+			// backup top-grid traversal state
+			const float4 tm_ = tm;
+			// intialize brick traversal
+			tm = A + V * (t *= 8); // abusing tm for I to save registers
+			uint p = (clamp( (uint)tm.x, tp >> 17, (tp >> 17) + 7 ) << 20) +
+				(clamp( (uint)tm.y, (tp >> 7) & 1023, ((tp >> 7) & 1023) + 7 ) << 10) +
+				clamp( (uint)tm.z, (tp << 3) & 1023, ((tp << 3) & 1023) + 7 ), lp = ~1;
+			tm = ((float4)((p >> 20) + OFFS_X, ((p >> 10) & 1023) + OFFS_Y, (p & 1023) + OFFS_Z, 0) - A) * rV;
+			p &= 7 + (7 << 10) + (7 << 20), o = (o >> 1) * BRICKSIZE;
+			const PAYLOAD* page;
+			do // traverse brick
+			{
+				uint v = o + (p >> 20) + ((p >> 7) & (BMSK * BRICKDIM)) + (p & BMSK) * BDIM2;
+				if (p != lp) page = (PAYLOAD*)bricks[v / (CHUNKSIZE / PAYLOADSIZE)], lp = p;
+				v = page[v & ((CHUNKSIZE / PAYLOADSIZE) - 1)];
+				if (v)
+				{
+					*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+					return v;
+				}
+				t = min( tm.x, min( tm.y, tm.z ) );
+				if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
+				else if (t == tm.y) tm.y += td.y, p += ((bits << 2) & 3072) - 1024, last = 1;
+				else if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
+			} while (!(p & TOPMASK3));
+			tm = tm_; // restore top-grid traversal state
+		}
+		t = min( tm.x, min( tm.y, tm.z ) );
+		if (t == tm.x) tm.x += td.x, tp += DIR_X << 20, last = 0;
+		else if (t == tm.y) tm.y += td.y, tp += DIR_Y << 10, last = 1;
+		else if (t == tm.z) tm.z += td.z, tp += DIR_Z, last = 2;
+	} while (!(tp & 0xf80e0380));
+	return 0U;
+}
+
+#else
+
 // mighty two-level grid traversal
 uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
@@ -43,41 +120,47 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
 	}
 	uint p = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
-		clamp( (uint)A.z >> 3, 0u, 127u );
+		clamp( (uint)A.z >> 3, 0u, 127u ), p_;
 	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
-	float4 tm = ((float4)( ((p >> 20) & 127) + ((bits >> 5) & 1), ((p >> 10) & 127) + ((bits >> 13) & 1),
-		(p & 127) + ((bits >> 21) & 1), 0 ) - A * 0.125f) * rV;
-	float t = 0;
-	const float4 td = (float4)( DIR_X, DIR_Y, DIR_Z, 0 ) * rV;
-	uint last = 0, pn = 0, posMask = 0xf80e0380;
-	do
+	float4 tm = ((float4)(((p >> 20) & 127) + ((bits >> 5) & 1), ((p >> 10) & 127) + ((bits >> 13) & 1),
+		(p & 127) + ((bits >> 21) & 1), 0) - A * 0.125f) * rV, tm_;
+	float t = 0, t_;
+	const float4 td = (float4)(DIR_X, DIR_Y, DIR_Z, 0) * rV;
+	uint last = 0, pn = 0, posMask = 0xf80e0380, state = 0, lp, o;
+	const PAYLOAD* page;
+	while (1)
 	{
-		// fetch brick from top grid
-		uint o = read_imageui( grid, (int4)(p >> 20, p & 127, (p >> 10) & 127, 0) ).x;
-		if (!--steps) break;
-		if (o != 0) if ((o & 1) == 0) /* solid */
+		if (state == 0)
 		{
-			*dist = t * 8.0f, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
-			return o >> 1;
+			// fetch brick from top grid
+			if ((p & posMask) != pn) break; // left the top-level grid
+			o = read_imageui( grid, (int4)(p >> 20, p & 127, (p >> 10) & 127, 0) ).x;
+			if (!--steps) break;
+			if (o != 0)
+			{
+				if ((o & 1) == 0) /* solid */
+				{
+					*dist = t * 8.0f, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+					return o >> 1;
+				}
+				else // switch to brick state
+				{
+					t_ = t, tm_ = tm, p_ = p; // backup top-grid traversal state
+					t *= 8.0f;
+					const float4 I = A + V * t;
+					p = (clamp( (uint)I.x, p >> 17, (p >> 17) + 7 ) << 20) +
+						(clamp( (uint)I.y, (p >> 7) & 1023, ((p >> 7) & 1023) + 7 ) << 10) +
+						clamp( (uint)I.z, (p << 3) & 1023, ((p << 3) & 1023) + 7 ), lp = p + 1;
+					pn = p & TOPMASK3;
+					posMask = TOPMASK3;
+					tm = ((float4)((p >> 20) + OFFS_X, ((p >> 10) & 1023) + OFFS_Y, (p & 1023) + OFFS_Z, 0) - A) * rV;
+					state = 1;
+				}
+			}
 		}
-		else // brick
+		if (state == 1)
 		{
-			// backup top-grid traversal state
-			const float t_ = t;
-			const float4 tm_ = tm;
-			const uint p_ = p;
-			// intialize brick traversal
-			t *= 8.0f;
-			const float4 I = A + V * t;
-			p = (clamp( (uint)I.x, p >> 17, (p >> 17) + 7 ) << 20) +
-				(clamp( (uint)I.y, (p >> 7) & 1023, ((p >> 7) & 1023) + 7 ) << 10) +
-				clamp( (uint)I.z, (p << 3) & 1023, ((p << 3) & 1023) + 7 );
-			uint lp = p + 1;
-			pn = p & TOPMASK3, posMask = TOPMASK3;
-			tm = ((float4)( (p >> 20) + OFFS_X, ((p >> 10) & 1023) + OFFS_Y, (p & 1023) + OFFS_Z, 0 ) - A) * rV;
-			const PAYLOAD* page;
-			// traverse brick
-			do
+			if ((p & posMask) != pn) t = t_, tm = tm_, p = p_, posMask = 0xf80e0380, pn = 0, state = 0; /* switch to top-level traversal */ else
 			{
 				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
 				if (p != lp) page = (PAYLOAD*)bricks[(idx / (CHUNKSIZE / PAYLOADSIZE)) & 3], lp = p;
@@ -87,21 +170,18 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 					*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
 					return color;
 				}
-				t = min( tm.x, min( tm.y, tm.z ) );
-				if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
-				if (t == tm.y) tm.y += td.y, p += DIR_Y << 10, last = 1;
-				if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
-			} while ((p & posMask) == pn);
-			// restore top-grid traversal state
-			t = t_, tm = tm_, pn = 0, p = p_, posMask = 0xf80e0380;
+			}
 		}
+		// common traversal code
 		t = min( tm.x, min( tm.y, tm.z ) );
 		if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
 		if (t == tm.y) tm.y += td.y, p += DIR_Y << 10, last = 1;
 		if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
-	} while ((p & posMask) == pn);
+	}
 	return 0U;
 }
+
+#endif
 
 // mighty two-level grid traversal
 uint TraceRay2( float4 A, const float4 B, float* dist, float3* N,
@@ -141,14 +221,14 @@ uint TraceRay2( float4 A, const float4 B, float* dist, float3* N,
 		// check main grid
 	#if GRID_IN_3DIMAGE == 1
 	#if CELLSKIPPING == 1
-		if (o & (1 << 30)) o = oo; else 
-	#endif
-		o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0) ).x;
+		if (o & (1 << 30)) o = oo; else
+		#endif
+			o = read_imageui( grid, (int4)(pos.x / BRICKDIM, pos.z / BRICKDIM, pos.y / BRICKDIM, 0) ).x;
 	#else
 	#if CELLSKIPPING == 1
-		if (o & (1 << 30)) o = oo; else 
-	#endif
-		o = grid[pos.x / BRICKDIM + ((pos.z / BRICKDIM) << 7) + ((pos.y / BRICKDIM) << 14)];
+		if (o & (1 << 30)) o = oo; else
+		#endif
+			o = grid[pos.x / BRICKDIM + ((pos.z / BRICKDIM) << 7) + ((pos.y / BRICKDIM) << 14)];
 	#endif
 		oo = o & 0xffffff;
 		if (oo != 0) if ((oo & 1) == 0) /* solid */
