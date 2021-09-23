@@ -990,7 +990,7 @@ void World::Render()
 	}
 	// get render parameters to GPU and invoke kernel asynchronously
 	paramBuffer->CopyToDevice( false );
-	renderer->Run( screen, make_int2( 32, 4 ), 0, &renderDone );
+	renderer->Run( screen, make_int2( 8, 16 ), 0, &renderDone );
 }
 
 // World::Commit

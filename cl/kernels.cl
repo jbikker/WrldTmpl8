@@ -18,7 +18,7 @@ float3 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 		// trace primary ray
 		float dist;
 		float3 N;
-		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * 0.333f, (float)v * 0.333f), params );
+		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
 		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 		// simple hardcoded directional lighting using arbitrary unit vector
 		if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky );

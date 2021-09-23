@@ -1416,6 +1416,7 @@ void Kernel::Run( cl_mem* buffers, int count, cl_event* eventToWaitFor, cl_event
 
 void Kernel::Run( Buffer* buffer, const int2 tileSize, cl_event* eventToWaitFor, cl_event* eventToSet, cl_event* acq, cl_event* rel )
 {
+	// execute a kernel for each pixel of a screen buffer, 1 thread per pixel
 	cl_int error;
 	if (!arg0set) FatalError( "Kernel expects at least 1 argument, none set." );
 	if (Kernel::candoInterop)

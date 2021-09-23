@@ -61,8 +61,9 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		}
 		else // brick
 		{
-			float d = t * 8.0f;
-			const float4 I = A + V * d;
+			float t_ = t;
+			t *= 8.0f;
+			const float4 I = A + V * t;
 			uint p = (clamp( (uint)I.x, pos >> 17, (pos >> 17) + 7 ) << 20) +
 				(clamp( (uint)I.y, (pos >> 7) & 1023, ((pos >> 7) & 1023) + 7 ) << 10) +
 				clamp( (uint)I.z, (pos << 3) & 1023, ((pos << 3) & 1023) + 7 ), lp = p + 1;
@@ -76,14 +77,15 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 				const unsigned int color = page[idx & ((CHUNKSIZE / PAYLOADSIZE) - 1)];
 				if (color)
 				{
-					*dist = d, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+					*dist = t, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
 					return color;
 				}
-				d = min( dm.x, min( dm.y, dm.z ) );
-				if (d == dm.x) dm.x += td.x, p += DIR_X << 20, last = 0;
-				if (d == dm.y) dm.y += td.y, p += DIR_Y << 10, last = 1;
-				if (d == dm.z) dm.z += td.z, p += DIR_Z, last = 2;
+				t = min( dm.x, min( dm.y, dm.z ) );
+				if (t == dm.x) dm.x += td.x, p += DIR_X << 20, last = 0;
+				if (t == dm.y) dm.y += td.y, p += DIR_Y << 10, last = 1;
+				if (t == dm.z) dm.z += td.z, p += DIR_Z, last = 2;
 			} while ((p & TOPMASK3) == pn);
+			t = t_;
 		}
 		if (!--steps) break;
 		t = min( tm.x, min( tm.y, tm.z ) );
