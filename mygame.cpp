@@ -27,5 +27,4 @@ void MyGame::Tick( float deltaTime )
 	MoveSpriteTo( sprite, 320, 80, 512 );
 	SetSpriteFrame( sprite, frame / 4 );
 	frame = (frame + 1) % 128;
-	WorldXScroll( -16 );
 }
