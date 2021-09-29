@@ -74,26 +74,24 @@ World::World( const uint targetID )
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
 	paramBuffer = new Buffer( sizeof( RenderParams ) / 4, Buffer::DEFAULT | Buffer::READONLY, &params );
-	screen = new Buffer( targetID, Buffer::TARGET );
 	renderer = new Kernel( "cl/kernels.cl", "render" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
+	batchTracer = new Kernel( renderer->GetProgram(), "traceBatch" );
 #if CELLSKIPPING == 1
 	hermitFinder = new Kernel( renderer->GetProgram(), "findHermits" );
 	hermitFinder->SetArgument( 0, &devmem );
 #endif
-	renderer->SetArgument( 0, screen );
-	renderer->SetArgument( 1, paramBuffer );
-	renderer->SetArgument( 2, &gridMap );
-	renderer->SetArgument( 3, brickBuffer[0] );
-	renderer->SetArgument( 4, brickBuffer[1] );
-	renderer->SetArgument( 5, brickBuffer[2] );
-	renderer->SetArgument( 6, brickBuffer[3] );
-	renderer->SetArgument( 7, sky );
+	targetTextureID = targetID;
 	committer->SetArgument( 1, &devmem );
 	committer->SetArgument( 2, brickBuffer[0] );
 	committer->SetArgument( 3, brickBuffer[1] );
 	committer->SetArgument( 4, brickBuffer[2] );
 	committer->SetArgument( 5, brickBuffer[3] );
+	batchTracer->SetArgument( 0, &gridMap );
+	batchTracer->SetArgument( 1, brickBuffer[0] );
+	batchTracer->SetArgument( 2, brickBuffer[1] );
+	batchTracer->SetArgument( 3, brickBuffer[2] );
+	batchTracer->SetArgument( 4, brickBuffer[3] );
 	// prepare the bluenoise data
 	const uchar* data8 = (const uchar*)sob256_64; // tables are 8 bit per entry
 	uint* data32 = new uint[65536 * 5]; // we want a full uint per entry
@@ -105,8 +103,6 @@ World::World( const uint targetID )
 	blueNoise = new Buffer( 65536 * 5, Buffer::READONLY, data32 );
 	blueNoise->CopyToDevice();
 	delete data32;
-	renderer->SetArgument( 8, blueNoise );
-	targetTextureID = targetID;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
 }
@@ -177,7 +173,7 @@ void World::Clear()
 // ----------------------------------------------------------------------------
 void World::ScrollX( const int offset )
 {
-	if (offset % BRICKDIM != 0) FatalError( "ScollX( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
+	if (offset % BRICKDIM != 0) FatalError( "ScrollX( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
 	const int o = abs( offset / BRICKDIM );
 	for (uint z = 0; z < GRIDDEPTH; z++) for (uint y = 0; y < GRIDHEIGHT; y++)
 	{
@@ -186,7 +182,7 @@ void World::ScrollX( const int offset )
 		if (offset < 0)
 		{
 			for (int x = 0; x < o; x++) backup[x] = line[x];
-			for (int x = 0; x < GRIDWIDTH - o; x++) line[x] = line[x + 2];
+			for (int x = 0; x < GRIDWIDTH - o; x++) line[x] = line[x + o];
 			for (int x = 0; x < o; x++) line[GRIDWIDTH - o + x] = backup[x];
 		}
 		else
@@ -202,7 +198,7 @@ void World::ScrollX( const int offset )
 // ----------------------------------------------------------------------------
 void World::ScrollY( const int offset )
 {
-	if (offset % BRICKDIM != 0) FatalError( "ScollY( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
+	if (offset % BRICKDIM != 0) FatalError( "ScrollY( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
 	// TODO
 }
 
@@ -210,7 +206,7 @@ void World::ScrollY( const int offset )
 // ----------------------------------------------------------------------------
 void World::ScrollZ( const int offset )
 {
-	if (offset % BRICKDIM != 0) FatalError( "ScollZ( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
+	if (offset % BRICKDIM != 0) FatalError( "ScrollZ( %i ):\nCan only scroll by multiples of %i.", offset, BRICKDIM );
 	// TODO
 }
 
@@ -937,6 +933,43 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 	return 0U;
 }
 
+static Buffer* rayBatchBuffer = 0;
+static Buffer* rayBatchResult = 0;
+
+Ray* World::GetBatchBuffer()
+{
+	if (!rayBatchBuffer) 
+	{
+		uint* hostBuffer = new uint[SCRWIDTH * SCRHEIGHT * sizeof( Ray ) / 4];
+		rayBatchBuffer = new Buffer( SCRWIDTH * SCRHEIGHT * sizeof( Ray ) / 4, Buffer::DEFAULT, hostBuffer );
+		uint* hostResults = new uint[SCRWIDTH * SCRHEIGHT * sizeof( Intersection ) / 4];
+		rayBatchResult = new Buffer( SCRWIDTH * SCRHEIGHT * sizeof( Intersection ) / 4, Buffer::DEFAULT, hostResults );
+		// now that we have the buffers, we can pass them to the kernel (just once)
+		batchTracer->SetArgument( 6, rayBatchBuffer );
+		batchTracer->SetArgument( 7, rayBatchResult );
+	}
+	return (Ray*)rayBatchBuffer->hostBuffer;
+}
+
+Intersection* World::TraceBatch( const uint batchSize )
+{
+	// sanity checks
+	if (!rayBatchBuffer) FatalError( "TraceBatch: Batch not yet created." );
+	if (batchSize > SCRWIDTH * SCRHEIGHT) FatalError( "TraceBatch: batch is too large." );
+	if (batchSize > 0)
+	{
+		// copy the ray batch to the GPU
+		rayBatchBuffer->CopyToDevice();
+		// invoke ray tracing kernel
+		batchTracer->SetArgument( 5, (int)batchSize );
+		batchTracer->Run( batchSize );
+		// get results back from GPU
+		rayBatchResult->CopyFromDevice( true /* blocking */ );
+	}
+	// return host buffer with ray tracing results
+	return (Intersection*)rayBatchResult->hostBuffer;
+}
+
 /*
 Render flow:
 1. GLFW application loop in template.cpp calls World::Render:
@@ -966,21 +999,11 @@ to ensure it completes before the commit kernel is executed on this data.
 // ----------------------------------------------------------------------------
 void World::Render()
 {
-	// prepare for rendering
-	const mat4 M = camMat;
-	const float aspectRatio = (float)SCRWIDTH / SCRHEIGHT;
-	params.E = TransformPosition( make_float3( 0 ), M );
-	params.oneOverRes = make_float2( 1.0f / SCRWIDTH, 1.0f / SCRHEIGHT );
-	params.p0 = TransformPosition( make_float3( -aspectRatio, 1, 3 ), M );
-	params.p1 = TransformPosition( make_float3( aspectRatio, 1, 3 ), M );
-	params.p2 = TransformPosition( make_float3( -aspectRatio, -1, 3 ), M );
-	params.R0 = RandomUInt();
-	static uint frame = 0;
-	params.frame = frame++;
-	// use GPU to render current world state in the background
+	// copy scene changes from staging buffer to final destination on GPU
+	// Note: even if game->autoRendering is false, we still keep the scene in sync
+	// with this mechanism.
 	if (copyInFlight)
 	{
-		// finalize the asynchronous copy by executing the commit kernel
 		if (tasks > 0)
 		{
 			committer->SetArgument( 0, (int)tasks );
@@ -988,9 +1011,36 @@ void World::Render()
 		}
 		copyInFlight = false, commitInFlight = true;
 	}
-	// get render parameters to GPU and invoke kernel asynchronously
-	paramBuffer->CopyToDevice( false );
-	renderer->Run( screen, make_int2( 8, 16 ), 0, &renderDone );
+	if (Game::autoRendering)
+	{
+		// prepare for rendering
+		const mat4 M = camMat;
+		const float aspectRatio = (float)SCRWIDTH / SCRHEIGHT;
+		params.E = TransformPosition( make_float3( 0 ), M );
+		params.oneOverRes = make_float2( 1.0f / SCRWIDTH, 1.0f / SCRHEIGHT );
+		params.p0 = TransformPosition( make_float3( aspectRatio, 1, 3 ), M );
+		params.p1 = TransformPosition( make_float3( -aspectRatio, 1, 3 ), M );
+		params.p2 = TransformPosition( make_float3( aspectRatio, -1, 3 ), M );
+		params.R0 = RandomUInt();
+		static uint frame = 0;
+		params.frame = frame++;
+		// get render parameters to GPU and invoke kernel asynchronously
+		paramBuffer->CopyToDevice( false );
+		if (!screen)
+		{
+			screen = new Buffer( targetTextureID, Buffer::TARGET );
+			renderer->SetArgument( 0, screen );
+			renderer->SetArgument( 1, paramBuffer );
+			renderer->SetArgument( 2, &gridMap );
+			renderer->SetArgument( 3, brickBuffer[0] );
+			renderer->SetArgument( 4, brickBuffer[1] );
+			renderer->SetArgument( 5, brickBuffer[2] );
+			renderer->SetArgument( 6, brickBuffer[3] );
+			renderer->SetArgument( 7, sky );
+			renderer->SetArgument( 8, blueNoise );
+		}
+		renderer->Run( screen, make_int2( 8, 16 ), 0, &renderDone );
+	}
 }
 
 // World::Commit
@@ -1077,17 +1127,19 @@ void World::Commit()
 		if (sprite[i]->hasShadow) RemoveSpriteShadow( i );
 	}
 	// at this point, rendering *must* be done; let's make sure
-	cl_int renderStatus;
-	clGetEventInfo( renderDone, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof( cl_int ), &renderStatus, 0 );
-	if (!renderDone) printf( "didn't see that coming.\n" );
-	clWaitForEvents( 1, &renderDone );
-	// profiling: https://stackoverflow.com/questions/23272170/opencl-measure-kernels-time
-	cl_ulong renderStart = 0;
-	cl_ulong renderEnd = 0;
-	clGetEventProfilingInfo( renderDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &renderStart, 0 );
-	clGetEventProfilingInfo( renderDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &renderEnd, 0 );
-	unsigned long duration = (unsigned long)(renderEnd - renderStart); // in nanoseconds
-	renderTime = duration / 1000000000.0f;
+	if (Game::autoRendering)
+	{
+		cl_int renderStatus;
+		clGetEventInfo( renderDone, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof( cl_int ), &renderStatus, 0 );
+		clWaitForEvents( 1, &renderDone );
+		// profiling: https://stackoverflow.com/questions/23272170/opencl-measure-kernels-time
+		cl_ulong renderStart = 0;
+		cl_ulong renderEnd = 0;
+		clGetEventProfilingInfo( renderDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &renderStart, 0 );
+		clGetEventProfilingInfo( renderDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &renderEnd, 0 );
+		unsigned long duration = (unsigned long)(renderEnd - renderStart); // in nanoseconds
+		renderTime = duration / 1000000000.0f;
+	}
 }
 
 // World::StreamCopyMT

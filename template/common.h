@@ -19,7 +19,7 @@
 #define BRICKDIM	8		// brick dimensions
 #define BDIMLOG2	3		// must be log2(BRICKDIM)
 #define MAXCOMMITS	8192	// maximum number of bricks that can be committed per frame
-#if 1
+#if 0
 // 8-bit voxels: RGB332
 #define VOXEL8
 #define PAYLOAD unsigned char

@@ -25,6 +25,7 @@ float4 FixZeroDeltas( float4 V )
 #if 1
 
 // mighty two-level grid traversal
+// version A: optimized port of CPU code; rays step through top grid or brick with separate code.
 uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
@@ -101,6 +102,7 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 #else
 
 // mighty two-level grid traversal
+// version B: stepping the top-grid and bricks is handled by unified code. Slower, sadly. Perhaps good for divergence?
 uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )

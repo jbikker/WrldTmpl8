@@ -84,6 +84,32 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	write_imagef( outimg, (int2)(x, y), (float4)(pixel, 1) );
 }
 
+__kernel void traceBatch( 
+	__read_only image3d_t grid,
+	__global const unsigned char* brick0, __global const unsigned char* brick1,
+	__global const unsigned char* brick2, __global const unsigned char* brick3,
+	const int batchSize, __global const float4* rayData, __global uint* hitData )
+{
+	// sanity check
+	const uint taskId = get_global_id( 0 );
+	if (taskId >= batchSize) return;
+	// fetch ray from buffer
+	const float4 O4 = rayData[taskId * 2 + 0];
+	const float4 D4 = rayData[taskId * 2 + 1];
+	// trace ray
+	float3 N;
+	float dist;
+	const uint voxel = TraceRay( 
+		(float4)( O4.x, O4.y, O4.z, 1 ), 
+		(float4)( D4.x, D4.y, D4.z, 1 ),
+		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999 
+	);
+	// store query result
+	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
+	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
+	hitData[taskId * 2 + 1] = (voxel == 0 ? 0 : Nval) + (voxel << 16);
+}
+
 __kernel void commit( const int taskCount, __global uint* commit,
 	__global uint* brick0, __global uint* brick1, __global uint* brick2, __global uint* brick3 )
 {

@@ -18,6 +18,7 @@ void Bouncer::Init()
 // -----------------------------------------------------------
 void Bouncer::Tick( float deltaTime )
 {
+	screen->Print( "hello world", 0, 0, 0 );
 	LookAt( 300, 100, 300, (int)ballPos.x, 100, (int)ballPos.z );
 	// bounce ball
 	Sphere( ballPos.x, ballPos.y, ballPos.z, 25, 0 );

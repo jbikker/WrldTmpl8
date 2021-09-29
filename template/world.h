@@ -193,8 +193,10 @@ public:
 	void DrawTiles( const char* tileString, const uint x, const uint y, const uint z );
 	void DrawBigTile( const uint idx, const uint x, const uint y, const uint z );
 	void DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z );
-	// inline ray tracing / cpu-only ray tracing
+	// inline ray tracing / cpu-only ray tracing / inline ray batch rendering
 	uint TraceRay( float4 A, const float4 B, float& dist, float3& N, int steps );
+	Ray* GetBatchBuffer();
+	Intersection* TraceBatch( const uint batchSize );
 	// block scrolling
 	void ScrollX( const int offset );
 	void ScrollY( const int offset );
@@ -421,6 +423,7 @@ private:
 	int2 skySize;						// size of the skydome bitmap
 	RenderParams params;				// CPU-side copy of the renderer parameters
 	Kernel* renderer, * committer;		// render kernel and commit kernel
+	Kernel* batchTracer;				// ray batch tracing kernel for inline tracing
 #if CELLSKIPPING == 1
 	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
 	cl_event hermitDone;				// for profiling

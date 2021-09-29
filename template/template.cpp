@@ -55,9 +55,9 @@ void Sphere( const float3 pos, const float r, const uint c )
 {
 	world->Sphere( pos.x, pos.y, pos.z, r, c );
 }
-void Box(  const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint c )
+void Box( const int x1, const int y1, const int z1, const int x2, const int y2, const int z2, const uint c )
 {
-	for( int y = y1; y < y2; y++ ) for( int z = z1; z < z2; z++ ) for( int x = x1; x < x2; x++ ) Plot( x, y, z, c );
+	for (int y = y1; y < y2; y++) for (int z = z1; z < z2; z++) for (int x = x1; x < x2; x++) Plot( x, y, z, c );
 }
 void Box( const int3 pos1, const int3 pos2, const uint c )
 {
@@ -112,10 +112,10 @@ uint CreateSprite( const int x, const int y, const int z, const int w, const int
 {
 	return CreateSprite( make_int3( x, y, z ), make_int3( w, h, d ), frames );
 }
-int3 GetSpriteFrameSize( const uint idx ) 
+int3 GetSpriteFrameSize( const uint idx )
 {
 	auto& sprite = SpriteManager::GetSpriteManager()->sprite;
-	return sprite[idx]->frame[sprite[idx]->currFrame]->size; 
+	return sprite[idx]->frame[sprite[idx]->currFrame]->size;
 }
 uint GetSpriteVoxel( const uint idx, const int3 pos )
 {
@@ -200,7 +200,7 @@ void Line( const uint x1, const uint y1, const uint z1, const uint x2, const uin
 	if (l < 1) return;
 	float sx = (float)dx / l, sy = (float)dy / l, sz = (float)dz / l;
 	float x = (float)x1, y = (float)y1, z = (float)z1;
-	for( int i = 0; i < l; i++ )
+	for (int i = 0; i < l; i++)
 	{
 		world->Set( (int)x, (int)y, (int)z, c );
 		x += sx, y += sy, z += sz;
@@ -239,17 +239,28 @@ float Trace( const float3 P1, const float3 P2 )
 	world->TraceRay( make_float4( P1 + 0.001f * D, 1 ), make_float4( D, 1 ), dist, dummy, 999999 );
 	return dist;
 }
+Ray* GetBatchBuffer()
+{
+	if (Game::autoRendering) FatalError( "disable autoRendering for inline ray batch processing." );
+	return world->GetBatchBuffer();
+}
+Intersection* TraceBatch( const uint batchSize )
+{
+	if (Game::autoRendering) FatalError( "disable autoRendering for inline ray batch processing." );
+	return world->TraceBatch( batchSize );
+}
 
 uint RGB32to8( const uint c ) { return ((c >> 6) & 3) + (((c >> 13) & 7) << 2) + (((c >> 21) & 7) << 5); }
 uint BGR32to8( const uint c ) { return (((c >> 5) & 7) << 5) + (((c >> 13) & 7) << 2) + ((c >> 22) & 3); }
-float GetRenderTime() { return world->GetRenderTime(); } 
+uint RGB16to32( const uint c ) { return (((c >> 8) & 15) << 20) + (((c >> 4) & 15) << 12) + ((c & 15) << 4); }
+float GetRenderTime() { return world->GetRenderTime(); }
 
 // GLFW callbacks
 void InitRenderTarget( int w, int h )
 {
 	// allocate render target and surface
-		scrwidth = w, scrheight = h;
-		renderTarget = new GLTexture( scrwidth, scrheight, GLTexture::INTTARGET );
+	scrwidth = w, scrheight = h;
+	renderTarget = new GLTexture( scrwidth, scrheight, GLTexture::INTTARGET );
 }
 void ReshapeWindowCallback( GLFWwindow* window, int w, int h )
 {
@@ -320,8 +331,10 @@ void main()
 #endif
 	// initialize game
 	InitRenderTarget( SCRWIDTH, SCRHEIGHT );
+	Surface* screen = new Surface( SCRWIDTH, SCRHEIGHT );
 	world = new World( renderTarget->ID );
 	game = CreateGame();
+	game->screen = screen;
 	game->Init();
 	// after init, sync all bricks to GPU
 	world->ForceSyncAllBricks();
@@ -330,22 +343,23 @@ void main()
 		"#version 330\nin vec4 p;\nin vec2 t;out vec2 u;void main(){u=t;gl_Position=p;}",
 		"#version 330\nuniform sampler2D c;in vec2 u;out vec4 f;void main(){f=sqrt(texture(c,u));}", true );
 	float deltaTime = 0;
+	static int frameNr = 0;
+	static Timer timer;
 	while (!glfwWindowShouldClose( window ))
 	{
-		static Timer timer;
 		deltaTime = min( 500.0f, 1000.0f * timer.elapsed() );
 		timer.reset();
-		world->Render();
+		// process world changes made in the previous frame and start rendering on GPU
+		world->Render(); // GPU ray tracing code runs asynchronously, i.e. in the background
+		// while the GPU traces rays, update the world state using game->Tick
 		game->Tick( deltaTime );
-		if (GetAsyncKeyState( VK_LSHIFT )) for( int i = 0; i < 3; i++ ) game->Tick( deltaTime );
-		world->Commit();
-	#ifdef USE_CPU_DEVICE
-		// copy the destination buffer to the renderTarget texture
-		// TODO
-	#endif
-		static int frameNr = 0;
+		if (GetAsyncKeyState( VK_LSHIFT )) for (int i = 0; i < 3; i++) game->Tick( deltaTime );
+		// while the GPU still traces rays, send world changes to a staging buffer on the GPU
+		world->Commit(); // also waits for GPU to complete tracing rays
+		// send the rendering result to the screen using OpenGL
 		if (frameNr++ > 1)
 		{
+			if (!game->autoRendering) renderTarget->CopyFrom( game->screen );
 			shader->Bind();
 			shader->SetInputTexture( 0, "c", renderTarget );
 			DrawQuad();
@@ -564,7 +578,7 @@ void DrawQuad()
 	{
 		// generate buffers
 		static const GLfloat verts[] = { -1, 1, 0, 1, 1, 0, -1, -1, 0, 1, 1, 0, -1, -1, 0, 1, -1, 0 };
-		static const GLfloat uvdata[] = { 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1 };
+		static const GLfloat uvdata[] = { 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1 };
 		GLuint vertexBuffer = CreateVBO( verts, sizeof( verts ) );
 		GLuint UVBuffer = CreateVBO( uvdata, sizeof( uvdata ) );
 		glGenVertexArrays( 1, &vao );
@@ -630,7 +644,7 @@ void GLTexture::Bind( const uint slot )
 void GLTexture::CopyFrom( Surface* src )
 {
 	glBindTexture( GL_TEXTURE_2D, ID );
-	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, src->buffer );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, src->buffer );
 	CheckGL();
 }
 
@@ -950,7 +964,6 @@ void FatalError( const char* fmt, ... )
 #else
 	fprintf( stderr, t );
 #endif
-	assert( false );
 	while (1) exit( 0 );
 }
 
@@ -1104,7 +1117,12 @@ Buffer::Buffer( unsigned int N, unsigned int t, void* ptr )
 // ----------------------------------------------------------------------------
 Buffer::~Buffer()
 {
-	if (ownData) delete hostBuffer;
+	if (ownData) 
+	{
+		delete hostBuffer;
+		hostBuffer = 0;
+	}
+	if ((type & (TEXTURE | TARGET)) == 0) clReleaseMemObject( deviceBuffer );
 }
 
 // CopyToDevice method
@@ -1170,7 +1188,7 @@ Kernel::Kernel( char* file, char* entryPoint )
 		if (pos == string::npos) break;
 		// start of expanded source construction
 		string tmp;
-		if (pos > 0) 
+		if (pos > 0)
 			tmp = csText.substr( 0, pos - 1 ) + "\n",
 			includes[Ninc].start = LineCount( tmp ); // record first line of #include content
 		else
@@ -1228,7 +1246,7 @@ Kernel::Kernel( char* file, char* entryPoint )
 			// translate file and line number of error and report
 			log[errorPos + 2048] = 0;
 			int lineNr = 0, linePos = 0;
-			char* lns = strstr( log + errorPos, ">:" ), *eol;
+			char* lns = strstr( log + errorPos, ">:" ), * eol;
 			if (!lns) FatalError( "unkown error text format", log + errorPos ); else
 			{
 				lns += 2;
@@ -1242,14 +1260,14 @@ Kernel::Kernel( char* file, char* entryPoint )
 				lineNr--; // we count from 0 instead of 1
 				// adjust file and linenr based on include file data
 				string errorFile = file;
-				for( int i = Ninc - 1; i >= 0; i-- )
+				for (int i = Ninc - 1; i >= 0; i--)
 				{
-					if (lineNr > includes[i].end) 
+					if (lineNr > includes[i].end)
 					{
-						for( int j = 0; j <= i; j++ ) lineNr -= includes[j].end - includes[j].start;
+						for (int j = 0; j <= i; j++) lineNr -= includes[j].end - includes[j].start;
 						break;
 					}
-					else if (lineNr > includes[i].start) 
+					else if (lineNr > includes[i].start)
 					{
 						errorFile = includes[i].file;
 						lineNr -= includes[i].start;
@@ -1488,6 +1506,12 @@ void Surface::Clear( uint c )
 {
 	const int s = width * height;
 	for (int i = 0; i < s; i++) buffer[i] = c;
+}
+
+void Surface::Plot( int x, int y, uint c )
+{
+	if (x < 0 || y < 0 || x >= width || y >= height) return;
+	buffer[x + y * width] = c;
 }
 
 void Surface::Print( const char* s, int x1, int y1, uint c )

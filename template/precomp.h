@@ -794,18 +794,12 @@ public:
 		}
 		right = normalize( right );
 		float3 newUp = cross( dir, right );
-		cameraToWorld( 0, 0 ) = right.x;
-		cameraToWorld( 1, 0 ) = right.y;
-		cameraToWorld( 2, 0 ) = right.z;
-		cameraToWorld( 3, 0 ) = 0.;
-		cameraToWorld( 0, 1 ) = newUp.x;
-		cameraToWorld( 1, 1 ) = newUp.y;
-		cameraToWorld( 2, 1 ) = newUp.z;
-		cameraToWorld( 3, 1 ) = 0.;
-		cameraToWorld( 0, 2 ) = dir.x;
-		cameraToWorld( 1, 2 ) = dir.y;
-		cameraToWorld( 2, 2 ) = dir.z;
-		cameraToWorld( 3, 2 ) = 0.;
+		cameraToWorld( 0, 0 ) = right.x, cameraToWorld( 1, 0 ) = right.y;
+		cameraToWorld( 2, 0 ) = right.z, cameraToWorld( 3, 0 ) = 0.;
+		cameraToWorld( 0, 1 ) = newUp.x, cameraToWorld( 1, 1 ) = newUp.y;
+		cameraToWorld( 2, 1 ) = newUp.z, cameraToWorld( 3, 1 ) = 0.;
+		cameraToWorld( 0, 2 ) = dir.x, cameraToWorld( 1, 2 ) = dir.y;
+		cameraToWorld( 2, 2 ) = dir.z, cameraToWorld( 3, 2 ) = 0.;
 		return cameraToWorld.Inverted();
 	}
 	static mat4 Translate( const float x, const float y, const float z ) { mat4 r; r.cell[3] = x; r.cell[7] = y; r.cell[11] = z; return r; };
@@ -918,16 +912,14 @@ public:
 		if (tr > 0)
 		{
 			S = sqrtf( tr + 1.0f ) * 2, w = 0.25f * S;
-			x = (m( 2, 1 ) - m( 1, 2 )) / S;
-			y = (m( 0, 2 ) - m( 2, 0 )) / S;
+			x = (m( 2, 1 ) - m( 1, 2 )) / S, y = (m( 0, 2 ) - m( 2, 0 )) / S;
 			z = (m( 1, 0 ) - m( 0, 1 )) / S;
 		}
 		else if (m( 0, 0 ) > m( 1, 1 ) && m( 0, 0 ) > m( 2, 2 ))
 		{
 			S = sqrt( 1.0f + m( 0, 0 ) - m( 1, 1 ) - m( 2, 2 ) ) * 2;
 			w = (m( 2, 1 ) - m( 1, 2 )) / S, x = 0.25f * S;
-			y = (m( 0, 1 ) + m( 1, 0 )) / S;
-			z = (m( 0, 2 ) + m( 2, 0 )) / S;
+			y = (m( 0, 1 ) + m( 1, 0 )) / S, z = (m( 0, 2 ) + m( 2, 0 )) / S;
 		}
 		else if (m( 1, 1 ) > m( 2, 2 ))
 		{
@@ -939,8 +931,7 @@ public:
 		else
 		{
 			S = sqrt( 1.0f + m( 2, 2 ) - m( 0, 0 ) - m( 1, 1 ) ) * 2;
-			w = (m( 1, 0 ) - m( 0, 1 )) / S;
-			x = (m( 0, 2 ) + m( 2, 0 )) / S;
+			w = (m( 1, 0 ) - m( 0, 1 )) / S, x = (m( 0, 2 ) + m( 2, 0 )) / S;
 			y = (m( 1, 2 ) + m( 2, 1 )) / S, z = 0.25f * S;
 		}
 	}
@@ -955,13 +946,9 @@ public:
 	{
 		mat4 ret;
 		ret.cell[0] = 1 - 2 * y * y - 2 * z * z;
-		ret.cell[1] = 2 * x * y - 2 * w * z;
-		ret.cell[2] = 2 * x * z + 2 * w * y;
-		ret.cell[4] = 2 * x * y + 2 * w * z;
+		ret.cell[1] = 2 * x * y - 2 * w * z, ret.cell[2] = 2 * x * z + 2 * w * y, ret.cell[4] = 2 * x * y + 2 * w * z;
 		ret.cell[5] = 1 - 2 * x * x - 2 * z * z;
-		ret.cell[6] = 2 * y * z - 2 * w * x;
-		ret.cell[8] = 2 * x * z - 2 * w * y;
-		ret.cell[9] = 2 * y * z + 2 * w * x;
+		ret.cell[6] = 2 * y * z - 2 * w * x, ret.cell[8] = 2 * x * z - 2 * w * y, ret.cell[9] = 2 * y * z + 2 * w * x;
 		ret.cell[10] = 1 - 2 * x * x - 2 * y * y;
 		return ret;
 	}
@@ -978,23 +965,19 @@ public:
 	{
 		float3 ret;
 		quat one( 1, 0, 0, 0 ), delta = one - *this, r = (delta / dt);
-		r = r * 2, r = r * one;
-		ret.x = r.x, ret.y = r.y, ret.z = r.z;
+		r = r * 2, r = r * one, ret.x = r.x, ret.y = r.y, ret.z = r.z;
 		return ret;
 	}
 	float3 rotateVector( const float3& v ) const
 	{
-		float3 qv = make_float3( x, y, z );
-		float3 t = cross( qv, v ) * 2.0f;
+		float3 qv = make_float3( x, y, z ), t = cross( qv, v ) * 2.0f;
 		return v + t * w + cross( qv, t );
 	}
 	quat operator * ( const quat& q ) const
 	{
 		return quat(
-			w * q.w - x * q.x - y * q.y - z * q.z,
-			w * q.x + x * q.w + y * q.z - z * q.y,
-			w * q.y - x * q.z + y * q.w + z * q.x,
-			w * q.z + x * q.y - y * q.x + z * q.w
+			w * q.w - x * q.x - y * q.y - z * q.z, w * q.x + x * q.w + y * q.z - z * q.y,
+			w * q.y - x * q.z + y * q.w + z * q.x, w * q.z + x * q.y - y * q.x + z * q.w
 		);
 	}
 	static quat slerp( const quat& a, const quat& b, const float t )
@@ -1011,18 +994,14 @@ public:
 		float sinHalfTheta = sqrtf( 1.0f - cosHalfTheta * cosHalfTheta );
 		if (fabs( sinHalfTheta ) < 0.001f)
 		{
-			qm.w = a.w * 0.5f + b.w * 0.5f;
-			qm.x = a.x * 0.5f + b.x * 0.5f;
-			qm.y = a.y * 0.5f + b.y * 0.5f;
-			qm.z = a.z * 0.5f + b.z * 0.5f;
+			qm.w = a.w * 0.5f + b.w * 0.5f, qm.x = a.x * 0.5f + b.x * 0.5f;
+			qm.y = a.y * 0.5f + b.y * 0.5f, qm.z = a.z * 0.5f + b.z * 0.5f;
 			return qm;
 		}
 		float ratioA = sinf( (1 - t) * halfTheta ) / sinHalfTheta;
 		float ratioB = sinf( t * halfTheta ) / sinHalfTheta;
-		qm.w = (a.w * ratioA + b.w * ratioB);
-		qm.x = (a.x * ratioA + b.x * ratioB);
-		qm.y = (a.y * ratioA + b.y * ratioB);
-		qm.z = (a.z * ratioA + b.z * ratioB);
+		qm.w = (a.w * ratioA + b.w * ratioB), qm.x = (a.x * ratioA + b.x * ratioB);
+		qm.y = (a.y * ratioA + b.y * ratioB), qm.z = (a.z * ratioA + b.z * ratioB);
 		return qm;
 	}
 	quat operator + ( const quat& q ) const { return quat( w + q.w, x + q.x, y + q.y, z + q.z ); }
@@ -1037,14 +1016,7 @@ public:
 class Buffer
 {
 public:
-	enum
-	{
-		DEFAULT = 0,
-		TEXTURE = 8,
-		TARGET = 16,
-		READONLY = 1,
-		WRITEONLY = 2
-	};
+	enum { DEFAULT = 0, TEXTURE = 8, TARGET = 16, READONLY = 1, WRITEONLY = 2 };
 	// constructor / destructor
 	Buffer() : hostBuffer( 0 ) {}
 	Buffer( unsigned int N, unsigned int t = DEFAULT, void* ptr = 0 );
@@ -1111,64 +1083,25 @@ public:
 // global project settigs; shared with OpenCL
 #include "common.h"
 
-// Morton order
-uint MortonSeparate( uint v )
-{
-	v = (v | (v << 16)) & 0x3f0000ff;
-	v = (v | (v << 8)) & 0x0f00f00f;
-	v = (v | (v << 4)) & 0x030c30c3;
-	v = (v | (v << 2)) & 0x09249249;
-	return v; // v = 1023 yields 1001001001001001001001001001
-}
-uint XYZToMorton( const uint x, const uint y, const uint z )
-{
-#ifdef CPU_HAS_BMI2 // Haswell (2013) and beyond
-	return _pdep_u32( y, 0x24924924 ) | _pdep_u32( y, 0x12492492 ) | _pdep_u32( x, 0x09249249 );
-#else
-	return MortonSeparate( x ) + (MortonSeparate( y ) << 1) + (MortonSeparate( z ) << 2);
-#endif
-}
-void MortonToXYZ( const uint m, uint& x, uint& y, uint& z )
-{
-#ifdef CPU_HAS_BMI2
-	x = _pext_u32( m, 0x09249249 );
-	y = _pext_u32( m, 0x12492492 );
-	z = _pext_u32( m, 0x24924924 );
-#else
-	// unpack 3 10-bit indices from a 30-bit Morton code
-	uint value1 = m & 0x09249249;
-	uint value2 = (m >> 1) & 0x09249249;
-	uint value3 = (m >> 2) & 0x09249249;
-	value1 |= (value1 >> 2);
-	value2 |= (value2 >> 2);
-	value3 |= (value3 >> 2);
-	value1 &= 0x030c30c3;
-	value2 &= 0x030c30c3;
-	value3 &= 0x030c30c3;
-	value1 |= (value1 >> 4);
-	value2 |= (value2 >> 4);
-	value3 |= (value3 >> 4);
-	value1 &= 0x0300f00f;
-	value2 &= 0x0300f00f;
-	value3 &= 0x0300f00f;
-	value1 |= (value1 >> 8);
-	value2 |= (value2 >> 8);
-	value3 |= (value3 >> 8);
-	value1 &= 0x030000ff;
-	value2 &= 0x030000ff;
-	value3 &= 0x030000ff;
-	value1 |= (value1 >> 16);
-	value2 |= (value2 >> 16);
-	value3 |= (value3 >> 16);
-	x = value1 & 0x000003ff;
-	y = value2 & 0x000003ff;
-	z = value3 & 0x000003ff;
-#endif
-}
-
 // Add your headers here; they will be able to use all previously defined classes and namespaces.
 // In your own .cpp files just add #include "precomp.h".
 // #include "my_include.h"
+
+// structures for inline batch tracing
+struct Ray 
+{ 
+	union { float3 O; struct { float d1, d2, d3, t; }; };
+	union { float3 D; struct { uint u1, u2, u3, pixelIdx; }; };
+};
+struct Intersection 
+{ 
+	// data
+	float t; uint N; 
+	// access
+	float GetDistance() { return t; }
+	float3 GetNormal() { return make_float3( ((int)N & 3) - 1.0f, (((int)N >> 2) & 3) - 1.0f, (((int)N >> 4) & 3) - 1.0f ); } 
+	uint GetVoxel() { return N >> 16; }
+};
 
 // voxel world engine
 #include "world.h"
@@ -1186,6 +1119,15 @@ public:
 	virtual void MouseMove( int x, int y ) = 0;
 	virtual void KeyUp( int key ) = 0;
 	virtual void KeyDown( int key ) = 0;
+	Surface* screen = 0;
+	// settings
+	// autoRendering:
+	// If enabled (default), the framework automatically produces a ray traced image of the scene between calls 
+	// to Game::Tick. Ray tracing (by the GPU) runs in the background and overlaps the game::Tick call, so CPU
+	// and GPU work in parallel.
+	// If disabled, ray batches can be traced directly from Game::Tick. The results of ray batch queries must
+	// then be processed on the CPU to produce the final pixels. More control, but also more responsibility.
+	static inline bool autoRendering = true;
 };
 
 // EOF
