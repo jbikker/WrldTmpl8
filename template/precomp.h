@@ -18,6 +18,9 @@
 #include <algorithm>
 #include <assert.h>
 
+#include "bluenoise.h"
+#include "lib/stb_image.h"
+
 // header for AVX, and every technology before it.
 // if your CPU does not support this (unlikely), include the appropriate header instead.
 // see: https://stackoverflow.com/a/11228864/2844473
@@ -1128,6 +1131,18 @@ public:
 	// If disabled, ray batches can be traced directly from Game::Tick. The results of ray batch queries must
 	// then be processed on the CPU to produce the final pixels. More control, but also more responsibility.
 	static inline bool autoRendering = true;
+	// checkerBoard:
+	// If enabled (default), the bottom half of the skydome is replaced by a procedurally generated checkerboard
+	// pattern. The code for this can be found in World::LoadSky in world.cpp. Replacing this code by something
+	// of your own should be quite doable.
+	// When disabled, the full original skydome is visible.
+	static inline bool checkerBoard = false;
+	// HDR skydome:
+	// Specifies the skydome image to load. Must be an equiangular bitmap stored as .hdr file with 12 bytes per
+	// pixel. A collection of these can be found online at http://www.hdrlabs.com/sibl/archive.html. Additional
+	// bitmaps can be found via https://cgtricks.com/list-sites-free-hdri .
+	// It is advisable to use a high resolution image of 5000x2500 pixels or larger.
+	static inline char skyDomeImage[] = "assets/sky_15.hdr";
 };
 
 // EOF

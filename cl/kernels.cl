@@ -21,7 +21,7 @@ float3 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
 		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 		// simple hardcoded directional lighting using arbitrary unit vector
-		if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky );
+		if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight );
 		const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
 		pixel += BRDF1 * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
 	}
@@ -44,7 +44,7 @@ float3 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
-	if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky );
+	if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight );
 	const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
 	float3 incoming = (float3)(0, 0, 0);
 	const int x = (int)screenPos.x, y = (int)screenPos.y;
@@ -58,7 +58,7 @@ float3 render_gi( const float2 screenPos, __constant struct RenderParams* params
 		float3 N2;
 		float dist2;
 		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 /* cap on GI ray length */ );
-		if (voxel2 == 0) incoming += 8 * SampleSky( (float)(R.x, R.z, R.y), sky ); else /* secondary hit */
+		if (voxel2 == 0) incoming += 8 * SampleSky( (float)(R.x, R.z, R.y), sky, params->skyWidth, params->skyHeight ); else /* secondary hit */
 			incoming += INVPI * ToFloatRGB( voxel2 ) * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
 	}
 	return BRDF1 * incoming * (1.0f / GIRAYS);

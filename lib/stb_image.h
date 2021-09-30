@@ -7077,8 +7077,9 @@ static float *stbi__hdr_load(stbi__context *s, int *x, int *y, int *comp, int re
                }
             }
          }
+		 float* dst = hdr_data + (j * width) * req_comp;
          for (i=0; i < width; ++i)
-            stbi__hdr_convert(hdr_data+(j*width + i)*req_comp, scanline + i*4, req_comp);
+            stbi__hdr_convert(dst + i * 3, scanline + i*4, req_comp);
       }
       if (scanline)
          STBI_FREE(scanline);

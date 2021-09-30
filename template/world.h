@@ -166,7 +166,7 @@ public:
 	// initialization
 	void Clear();
 	void DummyWorld();
-	void LoadSky( const char* filename, const char* bin_name, const float scale = 1.0f );
+	void LoadSky( const char* filename, const float scale = 1.0f );
 	void ForceSyncAllBricks();
 	// camera
 	void SetCameraMatrix( const mat4& m ) { camMat = m; }
@@ -186,6 +186,7 @@ public:
 	uint SpriteFrameCount( const uint idx );
 	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z );
 	void RemoveSprite( const uint idx );
+	void StampSpriteTo( const uint idx, const uint x, const uint y, const uint z );
 	void SetSpriteFrame( const uint idx, const uint frame );
 	bool SpriteHit( const uint A, const uint B );
 	void SetParticle( const uint set, const uint idx, const uint3 pos, const uint v );

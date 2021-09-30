@@ -13,6 +13,7 @@ void MyGame::Init()
     // This function is for functionality that you only want to run once,
     // at the start of your game. You can setup the scene here, load some
     // sprites, and so on.
+	ClearWorld();
     sprite = LoadSprite( "assets/rock.vox" ); // this one has 32 frames
     LookAt( make_float3( 280, 128, 50 ), make_float3( 320, 128, 512 ) );
 }

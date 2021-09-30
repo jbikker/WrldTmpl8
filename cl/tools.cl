@@ -78,16 +78,16 @@ float3 GenerateCameraRay( const float2 pixelPos, __constant struct RenderParams*
 }
 
 // sample the HDR sky dome texture (bilinear)
-float3 SampleSky( const float3 T, __global float4* sky )
+float3 SampleSky( const float3 T, __global float4* sky, uint w, uint h )
 {
-	const float u = 5000 * SphericalPhi( T ) * INV2PI - 0.5f;
-	const float v = 2500 * SphericalTheta( T ) * INVPI - 0.5f;
+	const float u = w * SphericalPhi( T ) * INV2PI - 0.5f;
+	const float v = h * SphericalTheta( T ) * INVPI - 0.5f;
 	const float fu = u - floor( u ), fv = v - floor( v );
 	const int iu = (int)u, iv = (int)v;
-	const uint idx1 = (iu + iv * 5000) % (5000 * 2500);
-	const uint idx2 = (iu + 1 + iv * 5000) % (5000 * 2500);
-	const uint idx3 = (iu + (iv + 1) * 5000) % (5000 * 2500);
-	const uint idx4 = (iu + 1 + (iv + 1) * 5000) % (5000 * 2500);
+	const uint idx1 = (iu + iv * w) % (w * h);
+	const uint idx2 = (iu + 1 + iv * w) % (w * h);
+	const uint idx3 = (iu + (iv + 1) * w) % (w * h);
+	const uint idx4 = (iu + 1 + (iv + 1) * w) % (w * h);
 	const float4 s =
 		sky[idx1] * (1 - fu) * (1 - fv) + sky[idx2] * fu * (1 - fv) +
 		sky[idx3] * (1 - fu) * fv + sky[idx4] * fu * fv;

@@ -1,5 +1,4 @@
 #include "precomp.h"
-#include "bluenoise.h"
 
 // Acknowledgements:
 // B&H'21 = Brian Janssen and Hugo Peters, INFOMOV'21 assignment
@@ -65,7 +64,6 @@ World::World( const uint targetID )
 	grid = gridOrig = (uint*)_aligned_malloc( GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 64 );
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
 	DummyWorld();
-	LoadSky( "assets/sky_15.hdr", "assets/sky_15.bin.gz", 2.5f );
 	ClearMarks(); // clear 'modified' bit array
 	// report memory usage
 	printf( "Allocated %iMB on CPU and GPU for the top-level grid.\n", (int)(gridSize >> 20) );
@@ -212,93 +210,42 @@ void World::ScrollZ( const int offset )
 
 // World::LoadSky
 // ----------------------------------------------------------------------------
-void World::LoadSky( const char* filename, const char* bin_name, const float scale )
+void World::LoadSky( const char* filename, const float scale )
 {
 	// attempt to load skydome from compressed binary file
-	float* pixels = 0;
-#if 1
-	gzFile f = gzopen( bin_name, "rb" );
-	if (f != Z_NULL)
+	Timer t;
+	printf( "loading hdr data... " );
+	int bpp; // bytes per pixel
+	float* pixels = stbi_loadf( filename, &skySize.x, &skySize.y, &bpp, 0 );
+	printf( " completed in %5.2fms\n", t.elapsed() * 1000.0f );
+	// add a checkerboard. Note: could really use a blur.
+	if (Game::checkerBoard) 
 	{
-		printf( "loading compressed cached hdr data... " );
-		gzread( f, &skySize.x, 4 );
-		gzread( f, &skySize.y, 4 );
-		pixels = (float*)MALLOC64( skySize.x * skySize.y * sizeof( float ) * 3 );
-		gzread( f, pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
-		gzclose( f );
-		if (scale != 1.0f) for (int i = 0; i < skySize.x * skySize.y * 3; i++) pixels[i] *= scale;
-	#if 1
-		// add a checkerboard pattern
-		for (int y = 1250; y < 2500; y++) for (int x = 0; x < 5000; x++)
+		int y2 = skySize.y, y1 = y2 / 2, x2 = skySize.x;
+		float w = skySize.x, h = skySize.y;
+		for (int y = y1; y < y2; y++) for (int x = 0; x < x2; x++)
 		{
-			const float t = (x - 2500.0f) / 5000.0f * 2 * PI;
-			const float p = -(y - 1250.0f) / 2500.0f * PI;
+			const float t = (x - 0.5f * w) / w * 2 * PI;
+			const float p = -(y - 0.5f * h) / h * PI;
 			const float3 D = make_float3( cosf( p ) * cosf( t ), sinf( p ), cosf( p ) * sinf( t ) );
 			const float3 O = make_float3( 0, 20, 0 ), P = O - 20.0f / D.y * D;
 			const int u = (int)(P.x * 0.02f + 100000);
 			const int v = (int)(P.z * 0.02f + 100000);
 			const float d = ((u + v) & 1) ? 0.7f : 0.05f;
-			for (int i = 0; i < 3; i++) pixels[x * 3 + y * 15000 + i] = d;
+			for (int i = 0; i < 3; i++) pixels[x * 3 + y * x2 * 3 + i] = d;
 		}
-	#endif
-	}
-#else
-	ifstream f( bin_name, ios::binary );
-	if (f.is_open())
-	{
-		printf( "loading cached hdr data... " );
-		f.read( (char*)&skySize.x, sizeof( skySize.x ) );
-		f.read( (char*)&skySize.y, sizeof( skySize.y ) );
-		// TODO: Mmap
-		pixels = (float*)MALLOC64( skySize.x * skySize.y * sizeof( float ) * 3 );
-		f.read( (char*)pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
-	}
-#endif
-	if (!pixels)
-	{
-	#if 0
-		// load skydome from original .hdr file
-		printf( "loading original hdr data... " );
-		FREE_IMAGE_FORMAT fif = FIF_UNKNOWN;
-		fif = FreeImage_GetFileType( filename, 0 );
-		if (fif == FIF_UNKNOWN) fif = FreeImage_GetFIFFromFilename( filename );
-		FIBITMAP* dib = FreeImage_Load( fif, filename );
-		if (!dib) return;
-		skySize.x = FreeImage_GetWidth( dib );
-		skySize.y = FreeImage_GetHeight( dib );
-		uint pitch = FreeImage_GetPitch( dib );
-		uint bpp = FreeImage_GetBPP( dib );
-		printf( "Skydome %dx%d, pitch %d @%dbpp\n", skySize.x, skySize.y, pitch, bpp );
-		pixels = (float*)MALLOC64( skySize.x * skySize.y * sizeof( float ) * 3 );
-		for (int y = 0; y < skySize.y; y++)
-		{
-			uint* src = (uint*)FreeImage_GetScanLine( dib, skySize.y - 1 - y );
-			float* dst = (float*)pixels + y * skySize.x * 3;
-			if (bpp == 96) memcpy( dst, src, skySize.x * sizeof( float ) * 3 ); else
-				if (bpp == 128) for (int x = 0; x < skySize.x; x++)
-					memcpy( (float*)dst + 3 * x, (float*)src + 4 * x * sizeof( float ), sizeof( float ) * 4 );
-				else
-					FATALERROR( "Reading a skydome with %dbpp is not implemented!", bpp );
-		}
-		FreeImage_Unload( dib );
-		// save skydome to binary file, .hdr is slow to load
-		ofstream f( bin_name, ios::binary );
-		f.write( (char*)&skySize.x, sizeof( skySize.x ) );
-		f.write( (char*)&skySize.y, sizeof( skySize.y ) );
-		f.write( (char*)pixels, sizeof( float ) * 3 * skySize.x * skySize.y );
-	#endif
 	}
 	// convert to float4
 	float4* pixel4 = new float4[skySize.x * skySize.y];
 	for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++)
-		pixel4[x + y * skySize.x] = make_float4(
+		pixel4[x + y * skySize.x] = scale * make_float4(
 			pixels[x * 3 + y * 3 * skySize.x],
 			pixels[x * 3 + 1 + y * 3 * skySize.x],
 			pixels[x * 3 + 2 + y * 3 * skySize.x],
 			1
 		);
-	FREE64( pixels );
-	// load a sky dome
+	delete pixels;
+	// make the final buffer
 	sky = new Buffer( skySize.x * skySize.y * 4, Buffer::READONLY, pixel4 );
 	sky->CopyToDevice();
 }
@@ -443,7 +390,31 @@ uint SpriteManager::LoadSprite( const char* voxFile, bool palShift )
 			int dummy[8192]; // we are not supporting materials for now.
 			fread( dummy, 1, header.N, file );
 		}
-		else break; // FatalError( "LoadSprite( %s ):\nUnknown chunk.", voxFile );
+		else if (!strncmp( header.name, "MATL", 4 ))
+		{
+			int dummy[8192]; // we are not supporting materials for now.
+			fread( dummy, 1, header.N, file );
+		}
+		else if (!strncmp( header.name, "nTRN", 4 ))
+		{
+			int dummy[128]; // we are not supporting the extended world hierarchy for now.
+			fread( dummy, 1, header.N, file );
+		}
+		else if (!strncmp( header.name, "nGRP", 4 ))
+		{
+			int dummy[128]; // we are not supporting the extended world hierarchy for now.
+			fread( dummy, 1, header.N, file );
+		}
+		else if (!strncmp( header.name, "nSHP", 4 ))
+		{
+			int dummy[128]; // we are not supporting the extended world hierarchy for now.
+			fread( dummy, 1, header.N, file );
+		}
+		else if (!strncmp( header.name, "LAYR", 4 ))
+		{
+			int dummy[128]; // we are not supporting the extended world hierarchy for now.
+			fread( dummy, 1, header.N, file );
+		}
 	}
 	fclose( file );
 	// finalize new sprite
@@ -611,7 +582,6 @@ void World::DrawSprite( const uint idx )
 	{
 		const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
 		SpriteFrame* backup = sprite[idx]->backup;
-		const int3& s = backup->size = frame->size;
 	#if 1
 		const uchar4* localPos = frame->drawPos;
 		const PAYLOAD* val = frame->drawVal;
@@ -622,6 +592,7 @@ void World::DrawSprite( const uint idx )
 			Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, val[i] );
 		}
 	#else
+		const int3& s = backup->size = frame->size;
 		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
 		{
 			const uint voxel = frame->buffer[i];
@@ -632,7 +603,7 @@ void World::DrawSprite( const uint idx )
 	}
 	// store this location so we can remove the sprite later
 	sprite[idx]->lastPos = sprite[idx]->currPos;
-}
+	}
 
 // World::DrawSpriteShadow
 // ----------------------------------------------------------------------------
@@ -697,6 +668,26 @@ void World::RemoveSprite( const uint idx )
 	// move sprite to -9999 to keep it from taking CPU cycles
 	auto& sprite = GetSpriteList();
 	sprite[idx]->currPos.x = -9999;
+}
+
+// World::StampSpriteTo
+// ----------------------------------------------------------------------------
+void World::StampSpriteTo( const uint idx, const uint x, const uint y, const uint z )
+{
+	// out of bounds checks
+	auto& sprite = GetSpriteList();
+	if (idx >= sprite.size()) return;
+	// stamp sprite frame to specified location
+	const int3& pos = make_int3( x, y, z );
+	if (pos.x == -9999) return;
+	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
+	const uchar4* localPos = frame->drawPos;
+	const PAYLOAD* val = frame->drawVal;
+	for (uint i = 0; i < frame->drawListSize; i++)
+	{
+		const uchar4 v = localPos[i];
+		Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, val[i] );
+	}
 }
 
 // World::SetSpriteFrame
@@ -938,7 +929,7 @@ static Buffer* rayBatchResult = 0;
 
 Ray* World::GetBatchBuffer()
 {
-	if (!rayBatchBuffer) 
+	if (!rayBatchBuffer)
 	{
 		uint* hostBuffer = new uint[SCRWIDTH * SCRHEIGHT * sizeof( Ray ) / 4];
 		rayBatchBuffer = new Buffer( SCRWIDTH * SCRHEIGHT * sizeof( Ray ) / 4, Buffer::DEFAULT, hostBuffer );
@@ -1018,10 +1009,12 @@ void World::Render()
 		const float aspectRatio = (float)SCRWIDTH / SCRHEIGHT;
 		params.E = TransformPosition( make_float3( 0 ), M );
 		params.oneOverRes = make_float2( 1.0f / SCRWIDTH, 1.0f / SCRHEIGHT );
-		params.p0 = TransformPosition( make_float3( aspectRatio, 1, 3 ), M );
-		params.p1 = TransformPosition( make_float3( -aspectRatio, 1, 3 ), M );
-		params.p2 = TransformPosition( make_float3( aspectRatio, -1, 3 ), M );
+		params.p0 = TransformPosition( make_float3( aspectRatio, 1, 2.2f ), M );
+		params.p1 = TransformPosition( make_float3( -aspectRatio, 1, 2.2f ), M );
+		params.p2 = TransformPosition( make_float3( aspectRatio, -1, 2.2f ), M );
 		params.R0 = RandomUInt();
+		params.skyWidth = skySize.x;
+		params.skyHeight = skySize.y;
 		static uint frame = 0;
 		params.frame = frame++;
 		// get render parameters to GPU and invoke kernel asynchronously

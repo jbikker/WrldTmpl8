@@ -38,7 +38,7 @@
 #define PANINI		0
 
 // MSAA
-#define AA_SAMPLES	3	// note: will be squared
+#define AA_SAMPLES	1	// note: will be squared
 
 // some useful color names
 #ifdef VOXEL8
@@ -73,6 +73,7 @@ struct RenderParams
 	float2 oneOverRes;
 	float3 E, p0, p1, p2;
 	uint R0, frame;
+	uint skyWidth, skyHeight;
 };
 
 // lighting for 6 normals for sky15.hdr

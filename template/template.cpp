@@ -4,6 +4,9 @@
 #include "precomp.h"
 
 #define STB_IMAGE_IMPLEMENTATION
+#define STBI_NO_PSD
+#define STBI_NO_PIC
+#define STBI_NO_PNM
 #include "lib/stb_image.h"
 
 #pragma comment( linker, "/subsystem:windows /ENTRY:mainCRTStartup" )
@@ -154,6 +157,9 @@ void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { 
 void MoveSpriteTo( const uint idx, const int3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 void MoveSpriteTo( const uint idx, const uint3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 void RemoveSprite( const uint idx ) { world->RemoveSprite( idx ); }
+void StampSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->StampSpriteTo( idx, x, y, z ); }
+void StampSpriteTo( const uint idx, const int3 pos ) { world->StampSpriteTo( idx, pos.x, pos.y, pos.z ); }
+void StampSpriteTo( const uint idx, const uint3 pos ) { world->StampSpriteTo( idx, pos.x, pos.y, pos.z ); }
 uint LoadTile( const char* voxFile ) { return TileManager::GetTileManager()->LoadTile( voxFile ); }
 uint LoadBigTile( const char* voxFile ) { return TileManager::GetTileManager()->LoadBigTile( voxFile ); }
 void DrawTile( const uint idx, const uint x, const uint y, const uint z ) { world->DrawTile( idx, x, y, z ); }
@@ -336,6 +342,8 @@ void main()
 	game = CreateGame();
 	game->screen = screen;
 	game->Init();
+	// add a skydome to the world
+	world->LoadSky( Game::skyDomeImage );
 	// after init, sync all bricks to GPU
 	world->ForceSyncAllBricks();
 	// done, enter main loop
