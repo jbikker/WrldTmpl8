@@ -278,7 +278,7 @@ void SHMUP::NewBullet( int3 pos, int2 vel )
 void SHMUP::UpdateCamera()
 {
 	// default position and target
-	float3 position = make_float3( (cameraPos.x >> 8) - 5.f, 500, 308 );
+	float3 position = make_float3( (cameraPos.x >> 8) - 5.f, 250, 258 );
 	float3 target = make_float3( (float)(cameraPos.x >> 8), (float)(cameraPos.y >> 8), 512 );
 	// camera zoom
 	if (landBlock < 5) position.y = 40, position.z = 250; else if (landBlock < 15)

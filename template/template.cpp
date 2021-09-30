@@ -343,7 +343,7 @@ void main()
 	game->screen = screen;
 	game->Init();
 	// add a skydome to the world
-	world->LoadSky( Game::skyDomeImage );
+	world->LoadSky( Game::skyDomeImage.c_str() );
 	// after init, sync all bricks to GPU
 	world->ForceSyncAllBricks();
 	// done, enter main loop

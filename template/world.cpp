@@ -222,7 +222,7 @@ void World::LoadSky( const char* filename, const float scale )
 	if (Game::checkerBoard) 
 	{
 		int y2 = skySize.y, y1 = y2 / 2, x2 = skySize.x;
-		float w = skySize.x, h = skySize.y;
+		float w = (float)skySize.x, h = (float)skySize.y;
 		for (int y = y1; y < y2; y++) for (int x = 0; x < x2; x++)
 		{
 			const float t = (x - 0.5f * w) / w * 2 * PI;

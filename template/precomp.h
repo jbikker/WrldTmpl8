@@ -1142,7 +1142,7 @@ public:
 	// pixel. A collection of these can be found online at http://www.hdrlabs.com/sibl/archive.html. Additional
 	// bitmaps can be found via https://cgtricks.com/list-sites-free-hdri .
 	// It is advisable to use a high resolution image of 5000x2500 pixels or larger.
-	static inline char skyDomeImage[] = "assets/sky_15.hdr";
+	static inline string skyDomeImage = "assets/sky_17.hdr";
 };
 
 // EOF
