@@ -19,10 +19,12 @@ void Bouncer::Init()
 	for (int i = 0; i < 5; i++) StampSpriteTo( corvette, c[i * 3], c[i * 3 + 1], c[i * 3 + 2] );
 	// restore camera, if possible
 	FILE* f = fopen( "camera.dat", "rb" );
-	if (!f) return;
-	fread( &D, 1, sizeof( D ), f );
-	fread( &O, 1, sizeof( O ), f );
-	fclose( f );
+	if (f)
+	{
+		fread( &D, 1, sizeof( D ), f );
+		fread( &O, 1, sizeof( O ), f );
+		fclose( f );
+	}
 	// load spline path
 	PathPoint p;
 	FILE* fp = fopen( "assets/splinepath.bin", "rb" );
