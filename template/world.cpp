@@ -100,7 +100,7 @@ World::World( const uint targetID )
 	for (int i = 0; i < (128 * 128 * 8); i++) data32[i + 3 * 65536] = data8[i];
 	blueNoise = new Buffer( 65536 * 5, Buffer::READONLY, data32 );
 	blueNoise->CopyToDevice();
-	delete data32;
+	delete [] data32;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
 }
