@@ -106,7 +106,8 @@ void Print( const char* text, const int3 pos, const uint c )
 {
 	world->Print( text, pos.x, pos.y, pos.z, c );
 }
-uint LoadSprite( const char* voxFile, bool palShift ) { return SpriteManager::GetSpriteManager()->LoadSprite( voxFile, palShift ); }
+uint LoadSprite( const char* voxFile, bool largeModel ) { return SpriteManager::GetSpriteManager()->LoadSprite( voxFile, largeModel ); }
+void SaveSprite( const uint idx, const char* vxFile ) { SpriteManager::GetSpriteManager()->SaveSprite( idx, vxFile ); }
 uint CreateSprite( const int3 pos, const int3 size, const int frames )
 {
 	return world->CreateSprite( pos, size, frames );
@@ -275,8 +276,8 @@ void ReshapeWindowCallback( GLFWwindow* window, int w, int h )
 void KeyEventCallback( GLFWwindow* window, int key, int scancode, int action, int mods )
 {
 	if (key == GLFW_KEY_ESCAPE) running = false;
-	if (action == GLFW_PRESS) { if (game) game->KeyDown( key ); }
-	else if (action == GLFW_RELEASE) { if (game) game->KeyUp( key ); }
+	if (action == GLFW_PRESS) { if (game) if (key >= 0) game->KeyDown( key ); }
+	else if (action == GLFW_RELEASE) { if (game) if (key >= 0) game->KeyUp( key ); }
 }
 void CharEventCallback( GLFWwindow* window, uint code ) { /* nothing here yet */ }
 void WindowFocusCallback( GLFWwindow* window, int focused ) { hasFocus = (focused == GL_TRUE); }
@@ -343,7 +344,7 @@ void main()
 	game->screen = screen;
 	game->Init();
 	// add a skydome to the world
-	world->LoadSky( Game::skyDomeImage.c_str() );
+	world->LoadSky( Game::skyDomeImage.c_str(), Game::skyDomeScale );
 	// after init, sync all bricks to GPU
 	world->ForceSyncAllBricks();
 	// done, enter main loop
@@ -378,6 +379,7 @@ void main()
 		if (!running) break;
 	}
 	// close down
+	game->Shutdown();
 	delete world;
 	Kernel::KillCL();
 	glfwDestroyWindow( window );

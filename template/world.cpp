@@ -1,5 +1,8 @@
 #include "precomp.h"
 
+#define OGT_VOX_IMPLEMENTATION
+#include "lib/ogt_vox.h"
+
 // Acknowledgements:
 // B&H'21 = Brian Janssen and Hugo Peters, INFOMOV'21 assignment
 // CO'21  = Christian Oliveros, INFOMOV'21 assignment
@@ -24,6 +27,17 @@ static const uint commitSize = BRICKCOMMITSIZE + gridSize;
 #define BPMZ		(MAPDEPTH - BRICKDIM)
 #define TOPMASK3	(((1023 - BMSK) << 20) + ((1023 - BMSK) << 10) + (1023 - BMSK))
 #define SELECT(a,b,c) ((c)?(b):(a))
+
+// helpers for skydome sampling
+float3 DiffuseReflectionCosWeighted( const float r0, const float r1, const float3& N )
+{
+	const float3 T = normalize( cross( N, fabs( N.y ) > 0.99f ? make_float3( 1, 0, 0 ) : make_float3( 0, 1, 0 ) ) );
+	const float3 B = cross( T, N );
+	const float term1 = TWOPI * r0, term2 = sqrt( 1 - r1 );
+	return (cosf( term1 ) * term2 * T) + (sinf( term1 ) * term2) * B + sqrt( r1 ) * N;
+}
+float SphericalTheta( const float3& v ) { return acosf( clamp( v.z, -1.f, 1.f ) ); }
+float SphericalPhi( const float3& v ) { const float p = atan2f( v.y, v.x ); return (p < 0) ? (p + 2 * PI) : p; }
 
 // World Constructor
 // ----------------------------------------------------------------------------
@@ -72,7 +86,12 @@ World::World( const uint targetID )
 	printf( "Allocated %iMB on CPU for brickInfo.\n", (int)((BRICKCOUNT * sizeof( BrickInfo )) >> 20) );
 	// initialize kernels
 	paramBuffer = new Buffer( sizeof( RenderParams ) / 4, Buffer::DEFAULT | Buffer::READONLY, &params );
+	history[0] = new Buffer( 4 * SCRWIDTH * SCRHEIGHT );
+	history[1] = new Buffer( 4 * SCRWIDTH * SCRHEIGHT );
+	tmpFrame = new Buffer( 4 * SCRWIDTH * SCRHEIGHT );
 	renderer = new Kernel( "cl/kernels.cl", "render" );
+	finalizer = new Kernel( renderer->GetProgram(), "finalize" );
+	unsharpen = new Kernel( renderer->GetProgram(), "unsharpen" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
 	batchTracer = new Kernel( renderer->GetProgram(), "traceBatch" );
 #if CELLSKIPPING == 1
@@ -145,7 +164,7 @@ void World::DummyWorld()
 	for (int x = 0; x < 1024; x++) for (int z = 0; z < 1024; z++)
 	{
 		Set( x, 6, z, WHITE );
-		Set( x, 257, z, WHITE );
+		Set( x, 256, z, WHITE );
 	}
 	for (int x = 0; x < 1024; x++) for (int y = 0; y < 256; y++)
 	{
@@ -219,7 +238,7 @@ void World::LoadSky( const char* filename, const float scale )
 	float* pixels = stbi_loadf( filename, &skySize.x, &skySize.y, &bpp, 0 );
 	printf( " completed in %5.2fms\n", t.elapsed() * 1000.0f );
 	// add a checkerboard. Note: could really use a blur.
-	if (Game::checkerBoard) 
+	if (Game::checkerBoard)
 	{
 		int y2 = skySize.y, y1 = y2 / 2, x2 = skySize.x;
 		float w = (float)skySize.x, h = (float)skySize.y;
@@ -235,19 +254,101 @@ void World::LoadSky( const char* filename, const float scale )
 			for (int i = 0; i < 3; i++) pixels[x * 3 + y * x2 * 3 + i] = d;
 		}
 	}
+	if (Game::debugLights)
+	{
+		// rgb test
+		float w = (float)skySize.x, h = (float)skySize.y;
+		for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++)
+		{
+			const float t = (x - 0.5f * w) / w * 2 * PI, p = -(y - 0.5f * h) / h * PI;
+			const float3 D = make_float3( cosf( p ) * cosf( t ), sinf( p ), cosf( p ) * sinf( t ) );
+			if (-D.x > 0.97f)
+				pixels[x * 3 + y * 3 * skySize.x] = 10,
+				pixels[x * 3 + y * 3 * skySize.x + 1] = 0,
+				pixels[x * 3 + y * 3 * skySize.x + 2] = 0;
+			else if (-D.z > 0.97f)
+				pixels[x * 3 + y * 3 * skySize.x] = 0,
+				pixels[x * 3 + y * 3 * skySize.x + 1] = 10,
+				pixels[x * 3 + y * 3 * skySize.x + 2] = 0;
+		}
+	}
+	if (Game::artificialSun)
+	{
+		float w = (float)skySize.x, h = (float)skySize.y;
+		const float3 L = normalize( make_float3( 2, 1.5f, 3 ) );
+		for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++)
+		{
+			const float t = (x - 0.5f * w) / w * 2 * PI, p = -(y - 0.5f * h) / h * PI;
+			const float3 D = make_float3( cosf( p ) * cosf( t ), sinf( p ), cosf( p ) * sinf( t ) );
+			if (dot( D, L ) > 0.999f)
+				pixels[x * 3 + y * 3 * skySize.x] = 24,
+				pixels[x * 3 + y * 3 * skySize.x + 1] = 24,
+				pixels[x * 3 + y * 3 * skySize.x + 2] = 18;
+		}
+	}
 	// convert to float4
 	float4* pixel4 = new float4[skySize.x * skySize.y];
-	for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++)
-		pixel4[x + y * skySize.x] = scale * make_float4(
-			pixels[x * 3 + y * 3 * skySize.x],
-			pixels[x * 3 + 1 + y * 3 * skySize.x],
-			pixels[x * 3 + 2 + y * 3 * skySize.x],
-			1
-		);
+	float* src = pixels;
+	for (int y = 0; y < skySize.y; y++) for (int x = 0; x < skySize.x; x++, src += 3)
+	{
+		float3 p3 = make_float3( src[0], src[1], src[2] );
+		pixel4[x + y * skySize.x] = scale * make_float4( p3, 1 );
+	}
 	delete pixels;
 	// make the final buffer
 	sky = new Buffer( skySize.x * skySize.y * 4, Buffer::READONLY, pixel4 );
 	sky->CopyToDevice();
+	// update the sky lights
+	UpdateSkylights();
+}
+
+// World::SampleSky
+// ----------------------------------------------------------------------------
+float3 World::SampleSky( const float3& D )
+{
+	const int iw = skySize.x, ih = skySize.y;
+	const float w = (float)iw, h = (float)ih;
+	const float u = w * SphericalPhi( D ) * INV2PI - 0.5f;
+	const float v = h * SphericalTheta( D ) * INVPI - 0.5f;
+	const float fu = u - floorf( u ), fv = v - floorf( v );
+	const int iu = (int)u, iv = (int)v;
+	const uint idx1 = (iu + iv * iw) % (iw * ih);
+	const uint idx2 = (iu + 1 + iv * iw) % (iw * ih);
+	const uint idx3 = (iu + (iv + 1) * iw) % (iw * ih);
+	const uint idx4 = (iu + 1 + (iv + 1) * iw) % (iw * ih);
+	const float4 s =
+		((float4*)sky->hostBuffer)[idx1] * (1 - fu) * (1 - fv) +
+		((float4*)sky->hostBuffer)[idx2] * fu * (1 - fv) +
+		((float4*)sky->hostBuffer)[idx3] * (1 - fu) * fv +
+		((float4*)sky->hostBuffer)[idx4] * fu * fv;
+	return make_float3( s );
+}
+
+// World::UpdateSkylights
+// ----------------------------------------------------------------------------
+void World::UpdateSkylights()
+{
+	float3 N[6] = {
+		make_float3( -1, 0, 0 ), make_float3( 1, 0, 0 ),
+		make_float3( 0, 0, -1 ), make_float3( 0, 0, 1 ),
+		make_float3( 0, -1, 0 ), make_float3( 0, 1, 0 ),
+	};
+	Timer t;
+	printf( "Updating skylights... " );
+	for (int i = 0; i < 6; i++)
+	{
+		// spawn a large number of random directions around the normal (cosine distributed)
+		float3 sum = make_float3( 0 );
+		for (int j = 0; j < 4096; j++)
+		{
+			float sx = (j & 15) * 0.0625f, sy = ((j >> 4) & 15) * 0.0625f; // 256 strata
+			const float r0 = RandomFloat() * 0.0625f + sx, r1 = RandomFloat() * 0.0625f + sy;
+			const float3 R = DiffuseReflectionCosWeighted( r0, r1, N[i] );
+			sum += SampleSky( R );
+		}
+		skyLight[i] = make_float4( sum * (1.0f / 4096.0f), 0 );
+	}
+	printf( "done, in %5.2fms.\n", t.elapsed() * 1000.0f ); // ~5ms on a single thread.
 }
 
 /*
@@ -311,120 +412,95 @@ void World::Print( const char* text, const uint x, const uint y, const uint z, c
 
 // SpriteManager::LoadSprite
 // ----------------------------------------------------------------------------
-uint SpriteManager::LoadSprite( const char* voxFile, bool palShift )
+uint SpriteManager::LoadSprite( const char* voxFile, bool largeModel )
 {
-	// attempt to load the .vox file
-	FILE* file = fopen( voxFile, "rb" );
-	if (!file) FatalError( "LoadSprite( %s ):\nFile does not exist.", voxFile );
-	static struct ChunkHeader { char name[4]; int N; union { int M; char mainName[4]; }; } header;
-	fread( &header, 1, sizeof( ChunkHeader ), file );
-	if (strncmp( header.name, "VOX ", 4 )) FatalError( "LoadSprite( %s ):\nBad header.", voxFile );
-	if (header.N != 150) FatalError( "LoadSprite( %s ):\nBad version (%i).", voxFile, header.N );
-	if (strncmp( header.mainName, "MAIN", 4 )) FatalError( "LoadSprite( %s ):\nNo MAIN chunk.", voxFile );
-	fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of chunk content (N)
-	fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of children chunks (M)
-	// initialize the palette to the default palette
-	static uint palette[256];
-	static uint default_palette[256] = {
-		0x00000000, 0xffffffff, 0xffccffff, 0xff99ffff, 0xff66ffff, 0xff33ffff, 0xff00ffff, 0xffffccff, 0xffccccff, 0xff99ccff, 0xff66ccff, 0xff33ccff, 0xff00ccff, 0xffff99ff, 0xffcc99ff, 0xff9999ff,
-		0xff6699ff, 0xff3399ff, 0xff0099ff, 0xffff66ff, 0xffcc66ff, 0xff9966ff, 0xff6666ff, 0xff3366ff, 0xff0066ff, 0xffff33ff, 0xffcc33ff, 0xff9933ff, 0xff6633ff, 0xff3333ff, 0xff0033ff, 0xffff00ff,
-		0xffcc00ff, 0xff9900ff, 0xff6600ff, 0xff3300ff, 0xff0000ff, 0xffffffcc, 0xffccffcc, 0xff99ffcc, 0xff66ffcc, 0xff33ffcc, 0xff00ffcc, 0xffffcccc, 0xffcccccc, 0xff99cccc, 0xff66cccc, 0xff33cccc,
-		0xff00cccc, 0xffff99cc, 0xffcc99cc, 0xff9999cc, 0xff6699cc, 0xff3399cc, 0xff0099cc, 0xffff66cc, 0xffcc66cc, 0xff9966cc, 0xff6666cc, 0xff3366cc, 0xff0066cc, 0xffff33cc, 0xffcc33cc, 0xff9933cc,
-		0xff6633cc, 0xff3333cc, 0xff0033cc, 0xffff00cc, 0xffcc00cc, 0xff9900cc, 0xff6600cc, 0xff3300cc, 0xff0000cc, 0xffffff99, 0xffccff99, 0xff99ff99, 0xff66ff99, 0xff33ff99, 0xff00ff99, 0xffffcc99,
-		0xffcccc99, 0xff99cc99, 0xff66cc99, 0xff33cc99, 0xff00cc99, 0xffff9999, 0xffcc9999, 0xff999999, 0xff669999, 0xff339999, 0xff009999, 0xffff6699, 0xffcc6699, 0xff996699, 0xff666699, 0xff336699,
-		0xff006699, 0xffff3399, 0xffcc3399, 0xff993399, 0xff663399, 0xff333399, 0xff003399, 0xffff0099, 0xffcc0099, 0xff990099, 0xff660099, 0xff330099, 0xff000099, 0xffffff66, 0xffccff66, 0xff99ff66,
-		0xff66ff66, 0xff33ff66, 0xff00ff66, 0xffffcc66, 0xffcccc66, 0xff99cc66, 0xff66cc66, 0xff33cc66, 0xff00cc66, 0xffff9966, 0xffcc9966, 0xff999966, 0xff669966, 0xff339966, 0xff009966, 0xffff6666,
-		0xffcc6666, 0xff996666, 0xff666666, 0xff336666, 0xff006666, 0xffff3366, 0xffcc3366, 0xff993366, 0xff663366, 0xff333366, 0xff003366, 0xffff0066, 0xffcc0066, 0xff990066, 0xff660066, 0xff330066,
-		0xff000066, 0xffffff33, 0xffccff33, 0xff99ff33, 0xff66ff33, 0xff33ff33, 0xff00ff33, 0xffffcc33, 0xffcccc33, 0xff99cc33, 0xff66cc33, 0xff33cc33, 0xff00cc33, 0xffff9933, 0xffcc9933, 0xff999933,
-		0xff669933, 0xff339933, 0xff009933, 0xffff6633, 0xffcc6633, 0xff996633, 0xff666633, 0xff336633, 0xff006633, 0xffff3333, 0xffcc3333, 0xff993333, 0xff663333, 0xff333333, 0xff003333, 0xffff0033,
-		0xffcc0033, 0xff990033, 0xff660033, 0xff330033, 0xff000033, 0xffffff00, 0xffccff00, 0xff99ff00, 0xff66ff00, 0xff33ff00, 0xff00ff00, 0xffffcc00, 0xffcccc00, 0xff99cc00, 0xff66cc00, 0xff33cc00,
-		0xff00cc00, 0xffff9900, 0xffcc9900, 0xff999900, 0xff669900, 0xff339900, 0xff009900, 0xffff6600, 0xffcc6600, 0xff996600, 0xff666600, 0xff336600, 0xff006600, 0xffff3300, 0xffcc3300, 0xff993300,
-		0xff663300, 0xff333300, 0xff003300, 0xffff0000, 0xffcc0000, 0xff990000, 0xff660000, 0xff330000, 0xff0000ee, 0xff0000dd, 0xff0000bb, 0xff0000aa, 0xff000088, 0xff000077, 0xff000055, 0xff000044,
-		0xff000022, 0xff000011, 0xff00ee00, 0xff00dd00, 0xff00bb00, 0xff00aa00, 0xff008800, 0xff007700, 0xff005500, 0xff004400, 0xff002200, 0xff001100, 0xffee0000, 0xffdd0000, 0xffbb0000, 0xffaa0000,
-		0xff880000, 0xff770000, 0xff550000, 0xff440000, 0xff220000, 0xff110000, 0xffeeeeee, 0xffdddddd, 0xffbbbbbb, 0xffaaaaaa, 0xff888888, 0xff777777, 0xff555555, 0xff444444, 0xff222222, 0xff111111
-	};
-	memcpy( palette, default_palette, 1024 );
-	// create the sprite
-	Sprite* newSprite = new Sprite();
-	SpriteFrame* frame = 0;
-	int frameCount = 1; // will be overwritten if we encounter a 'PACK' chunk
-	// load chunks
-	while (1)
+	if (strstr( voxFile, ".vx" ))
 	{
-		memset( &header, 0, sizeof( ChunkHeader ) );
-		fread( &header, 1, sizeof( ChunkHeader ), file );
-		if (feof( file ) || header.name[0] == 0) break; // assume end of file
-		else if (!strncmp( header.name, "PACK", 4 ))
+		// load it from our custom file format
+		Sprite* newSprite = new Sprite();
+		gzFile f = gzopen( voxFile, "rb" );
+		int frames, pls;
+		gzread( f, &pls, 4 );
+		gzread( f, &frames, 4 );
+		if (pls != PAYLOADSIZE) FatalError( "File was saved with a different voxel size." );
+		int3 maxSize = make_int3( 0 );
+		for (int i = 0; i < frames; i++)
 		{
-			fread( &frameCount, 1, 4, file );
+			SpriteFrame* sf = new SpriteFrame();
+			newSprite->frame.push_back( sf );
+			gzread( f, &sf->size, 12 );
+			gzread( f, &sf->drawListSize, 4 );
+			sf->drawPos = new uint[sf->drawListSize];
+			sf->drawVal = new PAYLOAD[sf->drawListSize];
+			gzread( f, sf->drawPos, sf->drawListSize * sizeof( uint ) );
+			gzread( f, sf->drawVal, sf->drawListSize * PAYLOADSIZE );
+			maxSize.x = max( maxSize.x, sf->size.x );
+			maxSize.y = max( maxSize.y, sf->size.y );
+			maxSize.z = max( maxSize.z, sf->size.z );
 		}
-		else if (!strncmp( header.name, "SIZE", 4 ))
-		{
-			if (!frame) frame = new SpriteFrame();
-			fread( &frame->size, 1, 12, file );
-			swap( frame->size.y, frame->size.z ); // sorry Magica, z=up is just wrong
-		}
-		else if (!strncmp( header.name, "XYZI", 4 ))
-		{
-			struct { uchar x, y, z, i; } xyzi;
-			uint N;
-			int3 s = frame->size;
-			fread( &N, 1, 4, file );
-			frame->buffer = (PAYLOAD*)_aligned_malloc( s.x * s.y * s.z * PAYLOADSIZE, 64 ); // B&H'21
-			memset( frame->buffer, 0, s.x * s.y * s.z * PAYLOADSIZE );
-			for (uint i = 0; i < N; i++)
-			{
-				fread( &xyzi, 1, 4, file );
-				frame->buffer[xyzi.x + xyzi.z * s.x + xyzi.y * s.x * s.y] = xyzi.i;
-			}
-			if (newSprite->frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", voxFile );
-			newSprite->frame.push_back( frame );
-			frame = 0;
-		}
-		else if (!strncmp( header.name, "RGBA", 4 ))
-		{
-			fread( palette, 4, 256, file );
-		}
-		else if (!strncmp( header.name, "MATT", 4 ))
-		{
-			int dummy[8192]; // we are not supporting materials for now.
-			fread( dummy, 1, header.N, file );
-		}
-		else if (!strncmp( header.name, "MATL", 4 ))
-		{
-			int dummy[8192]; // we are not supporting materials for now.
-			fread( dummy, 1, header.N, file );
-		}
-		else if (!strncmp( header.name, "nTRN", 4 ))
-		{
-			int dummy[128]; // we are not supporting the extended world hierarchy for now.
-			fread( dummy, 1, header.N, file );
-		}
-		else if (!strncmp( header.name, "nGRP", 4 ))
-		{
-			int dummy[128]; // we are not supporting the extended world hierarchy for now.
-			fread( dummy, 1, header.N, file );
-		}
-		else if (!strncmp( header.name, "nSHP", 4 ))
-		{
-			int dummy[128]; // we are not supporting the extended world hierarchy for now.
-			fread( dummy, 1, header.N, file );
-		}
-		else if (!strncmp( header.name, "LAYR", 4 ))
-		{
-			int dummy[128]; // we are not supporting the extended world hierarchy for now.
-			fread( dummy, 1, header.N, file );
-		}
+		gzclose( f );
+		// create the backup frame for sprite movement
+		SpriteFrame* backupFrame = new SpriteFrame();
+		backupFrame->size = maxSize;
+		backupFrame->buffer = new PAYLOAD[maxSize.x * maxSize.y * maxSize.z];
+		newSprite->backup = backupFrame;
+		sprite.push_back( newSprite );
 	}
-	fclose( file );
-	// finalize new sprite
-	int3 maxSize = make_int3( 0 );
-	const uint offset = palShift ? 1 : 0;
-	for (int f = 0; f < frameCount; f++)
+	else if (largeModel)
 	{
-		// efficient sprite rendering: B&H'21
-		SpriteFrame* frame = newSprite->frame[f];
-		vector<uchar4> drawList;
+		// load via opengametools .vox file reader
+		FILE* fp = fopen( voxFile, "rb" );
+		uint32_t buffer_size = _filelength( _fileno( fp ) );
+		uint8_t* buffer = new uint8_t[buffer_size];
+		fread( buffer, buffer_size, 1, fp );
+		fclose( fp );
+		const ogt_vox_scene* scene = ogt_vox_read_scene( buffer, buffer_size );
+		delete[] buffer;
+		// find bounds of voxel scene
+		int3 bmin = make_int3( 0xffffff ), bmax = make_int3( -0xffffff );
+		for (uint i = 0; i < scene->num_instances; i++)
+		{
+			const ogt_vox_instance& instance = scene->instances[i];
+			const mat4 M = mat4::FromColumnMajor( *(mat4*)&instance.transform );
+			int3 pos = make_int3( M.GetTranslation() );
+			const ogt_vox_model* model = scene->models[instance.model_index];
+			int3 size = make_int3( M * make_float4( make_int3( model->size_x, model->size_y, model->size_z ), 0 ) );
+			bmin = min( bmin, min( pos, pos + size ) );
+			bmax = max( bmax, max( pos, pos + size ) );
+		}
+		// create sprite
+		Sprite* newSprite = new Sprite();
+		SpriteFrame* frame = new SpriteFrame();
+		frame->size = (bmax + make_int3( 1, 1, 1 )) - bmin;
+		swap( frame->size.y, frame->size.z );
+		int3 s = frame->size;
+		frame->buffer = (PAYLOAD*)_aligned_malloc( s.x * s.y * s.z * PAYLOADSIZE, 64 ); // B&H'21
+		memset( frame->buffer, 0, s.x * s.y * s.z * PAYLOADSIZE );
+		// store the data in the frame
+		for (uint i = 0; i < scene->num_instances; i++)
+		{
+			// get instance model data
+			// note: magicavoxel author is evil; voxel data may be transformed.
+			const ogt_vox_instance& instance = scene->instances[i];
+			const mat4 M = mat4::FromColumnMajor( *(mat4*)&instance.transform );
+			const int3 pos = make_int3( M.GetTranslation() ) - bmin;
+			const ogt_vox_model* model = scene->models[instance.model_index];
+			const int3 size = make_int3( model->size_x, model->size_y, model->size_z );
+			const int3 MX = make_int3( make_float3( M.cell[0], M.cell[1], M.cell[2] ) );
+			const int3 MY = make_int3( make_float3( M.cell[4], M.cell[5], M.cell[6] ) );
+			const int3 MZ = make_int3( make_float3( M.cell[8], M.cell[9], M.cell[10] ) );
+			// store actual voxels
+			for (int i = 0, z = 0; z < size.z; z++) for (int y = 0; y < size.y; y++) for (int x = 0; x < size.x; x++, i++)
+			{
+				const uint8_t v = model->voxel_data[i];
+				if (!v) continue;
+				const int3 l = make_int3( x, y, z );
+				const int3 p = make_int3( dot( MX, l ), dot( MY, l ), dot( MZ, l ) ) + pos;
+				frame->buffer[p.x + p.z * frame->size.x + p.y * frame->size.x * frame->size.y] = v;
+			}
+		}
+		// finalize frame
+		vector<uint> drawList;
 		vector<PAYLOAD> voxel;
 		for (int i = 0, z = 0; z < frame->size.z; z++)
 		{
@@ -434,45 +510,228 @@ uint SpriteManager::LoadSprite( const char* voxFile, bool palShift )
 				{
 					if (frame->buffer[i])
 					{
-						const uint c = palette[frame->buffer[i] - offset];
+						const ogt_vox_rgba c = scene->palette.color[frame->buffer[i]];
 					#if PAYLOADSIZE == 1
-						const uint blue = min( 3u, (((c >> 16) & 255) + 31) >> 6 );
-						const uint green = min( 7u, (((c >> 8) & 255) + 15) >> 5 );
-						const uint red = min( 7u, ((c & 255) + 15) >> 5 );
+						const uint blue = min( 3u, (uint)(c.r + 31) >> 6 );
+						const uint green = min( 7u, (uint)(c.g + 15) >> 5 );
+						const uint red = min( 7u, (uint)c.b >> 5 );
 						const uint p = (red << 5) + (green << 2) + blue;
 						const PAYLOAD v = (p == 0) ? (1 << 5) : p;
 					#else
-						const uint blue = min( 15u, (((c >> 16) & 255) + 7) >> 4 );
-						const uint green = min( 15u, (((c >> 8) & 255) + 7) >> 4 );
-						const uint red = min( 15u, ((c & 255) + 7) >> 4 );
+						const uint blue = min( 15u, (uint)(c.r + 7) >> 4 );
+						const uint green = min( 15u, (uint)(c.g + 7) >> 4 );
+						const uint red = min( 15u, (uint)(c.b + 7) >> 4 );
 						const uint p = (red << 8) + (green << 4) + blue;
 						const PAYLOAD v = (p == 0) ? 1 : p;
 					#endif
 						frame->buffer[i] = v;
-						drawList.push_back( make_uchar4( x, y, z, 0 ) );
+						drawList.push_back( x + (y << 10) + (z << 20) );
 						voxel.push_back( frame->buffer[i] );
 					}
 				}
 			}
 		}
-		maxSize.x = max( maxSize.x, frame->size.x );
-		maxSize.y = max( maxSize.y, frame->size.y );
-		maxSize.z = max( maxSize.z, frame->size.z );
-		frame->drawPos = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
+		frame->drawPos = (uint*)_aligned_malloc( drawList.size() * sizeof( uint ), 64 );
 		frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
 		for (size_t s = drawList.size(), i = 0; i < s; i++)
 			frame->drawPos[i] = drawList[i],
 			frame->drawVal[i] = voxel[i];
 		frame->drawListSize = (uint)drawList.size();
+		newSprite->frame.push_back( frame );
+		// create the backup frame for sprite movement
+		SpriteFrame* backupFrame = new SpriteFrame();
+		backupFrame->size = frame->size;
+		backupFrame->buffer = new PAYLOAD[frame->size.x * frame->size.y * frame->size.z];
+		newSprite->backup = backupFrame;
+		sprite.push_back( newSprite );
+		// clear ogt_vox_scene
+		ogt_vox_destroy_scene( scene );
 	}
-	// create the backup frame for sprite movement
-	SpriteFrame* backupFrame = new SpriteFrame();
-	backupFrame->size = maxSize;
-	backupFrame->buffer = new PAYLOAD[maxSize.x * maxSize.y * maxSize.z];
-	newSprite->backup = backupFrame;
-	sprite.push_back( newSprite );
+	else
+	{
+		// attempt to load the .vox file
+		FILE* file = fopen( voxFile, "rb" );
+		if (!file) FatalError( "LoadSprite( %s ):\nFile does not exist.", voxFile );
+		static struct ChunkHeader { char name[4]; int N; union { int M; char mainName[4]; }; } header;
+		fread( &header, 1, sizeof( ChunkHeader ), file );
+		if (strncmp( header.name, "VOX ", 4 )) FatalError( "LoadSprite( %s ):\nBad header.", voxFile );
+		if (header.N != 150) FatalError( "LoadSprite( %s ):\nBad version (%i).", voxFile, header.N );
+		if (strncmp( header.mainName, "MAIN", 4 )) FatalError( "LoadSprite( %s ):\nNo MAIN chunk.", voxFile );
+		fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of chunk content (N)
+		fread( &header.N, 1, 4, file ); // eat MAIN chunk num bytes of children chunks (M)
+		// initialize the palette to the default palette
+		static uint palette[256];
+		static uint default_palette[256] = {
+			0x00000000, 0xffffffff, 0xffccffff, 0xff99ffff, 0xff66ffff, 0xff33ffff, 0xff00ffff, 0xffffccff, 0xffccccff, 0xff99ccff, 0xff66ccff, 0xff33ccff, 0xff00ccff, 0xffff99ff, 0xffcc99ff, 0xff9999ff,
+			0xff6699ff, 0xff3399ff, 0xff0099ff, 0xffff66ff, 0xffcc66ff, 0xff9966ff, 0xff6666ff, 0xff3366ff, 0xff0066ff, 0xffff33ff, 0xffcc33ff, 0xff9933ff, 0xff6633ff, 0xff3333ff, 0xff0033ff, 0xffff00ff,
+			0xffcc00ff, 0xff9900ff, 0xff6600ff, 0xff3300ff, 0xff0000ff, 0xffffffcc, 0xffccffcc, 0xff99ffcc, 0xff66ffcc, 0xff33ffcc, 0xff00ffcc, 0xffffcccc, 0xffcccccc, 0xff99cccc, 0xff66cccc, 0xff33cccc,
+			0xff00cccc, 0xffff99cc, 0xffcc99cc, 0xff9999cc, 0xff6699cc, 0xff3399cc, 0xff0099cc, 0xffff66cc, 0xffcc66cc, 0xff9966cc, 0xff6666cc, 0xff3366cc, 0xff0066cc, 0xffff33cc, 0xffcc33cc, 0xff9933cc,
+			0xff6633cc, 0xff3333cc, 0xff0033cc, 0xffff00cc, 0xffcc00cc, 0xff9900cc, 0xff6600cc, 0xff3300cc, 0xff0000cc, 0xffffff99, 0xffccff99, 0xff99ff99, 0xff66ff99, 0xff33ff99, 0xff00ff99, 0xffffcc99,
+			0xffcccc99, 0xff99cc99, 0xff66cc99, 0xff33cc99, 0xff00cc99, 0xffff9999, 0xffcc9999, 0xff999999, 0xff669999, 0xff339999, 0xff009999, 0xffff6699, 0xffcc6699, 0xff996699, 0xff666699, 0xff336699,
+			0xff006699, 0xffff3399, 0xffcc3399, 0xff993399, 0xff663399, 0xff333399, 0xff003399, 0xffff0099, 0xffcc0099, 0xff990099, 0xff660099, 0xff330099, 0xff000099, 0xffffff66, 0xffccff66, 0xff99ff66,
+			0xff66ff66, 0xff33ff66, 0xff00ff66, 0xffffcc66, 0xffcccc66, 0xff99cc66, 0xff66cc66, 0xff33cc66, 0xff00cc66, 0xffff9966, 0xffcc9966, 0xff999966, 0xff669966, 0xff339966, 0xff009966, 0xffff6666,
+			0xffcc6666, 0xff996666, 0xff666666, 0xff336666, 0xff006666, 0xffff3366, 0xffcc3366, 0xff993366, 0xff663366, 0xff333366, 0xff003366, 0xffff0066, 0xffcc0066, 0xff990066, 0xff660066, 0xff330066,
+			0xff000066, 0xffffff33, 0xffccff33, 0xff99ff33, 0xff66ff33, 0xff33ff33, 0xff00ff33, 0xffffcc33, 0xffcccc33, 0xff99cc33, 0xff66cc33, 0xff33cc33, 0xff00cc33, 0xffff9933, 0xffcc9933, 0xff999933,
+			0xff669933, 0xff339933, 0xff009933, 0xffff6633, 0xffcc6633, 0xff996633, 0xff666633, 0xff336633, 0xff006633, 0xffff3333, 0xffcc3333, 0xff993333, 0xff663333, 0xff333333, 0xff003333, 0xffff0033,
+			0xffcc0033, 0xff990033, 0xff660033, 0xff330033, 0xff000033, 0xffffff00, 0xffccff00, 0xff99ff00, 0xff66ff00, 0xff33ff00, 0xff00ff00, 0xffffcc00, 0xffcccc00, 0xff99cc00, 0xff66cc00, 0xff33cc00,
+			0xff00cc00, 0xffff9900, 0xffcc9900, 0xff999900, 0xff669900, 0xff339900, 0xff009900, 0xffff6600, 0xffcc6600, 0xff996600, 0xff666600, 0xff336600, 0xff006600, 0xffff3300, 0xffcc3300, 0xff993300,
+			0xff663300, 0xff333300, 0xff003300, 0xffff0000, 0xffcc0000, 0xff990000, 0xff660000, 0xff330000, 0xff0000ee, 0xff0000dd, 0xff0000bb, 0xff0000aa, 0xff000088, 0xff000077, 0xff000055, 0xff000044,
+			0xff000022, 0xff000011, 0xff00ee00, 0xff00dd00, 0xff00bb00, 0xff00aa00, 0xff008800, 0xff007700, 0xff005500, 0xff004400, 0xff002200, 0xff001100, 0xffee0000, 0xffdd0000, 0xffbb0000, 0xffaa0000,
+			0xff880000, 0xff770000, 0xff550000, 0xff440000, 0xff220000, 0xff110000, 0xffeeeeee, 0xffdddddd, 0xffbbbbbb, 0xffaaaaaa, 0xff888888, 0xff777777, 0xff555555, 0xff444444, 0xff222222, 0xff111111
+		};
+		memcpy( palette, default_palette, 1024 );
+		// create the sprite
+		Sprite* newSprite = new Sprite();
+		SpriteFrame* frame = 0;
+		int frameCount = 1; // will be overwritten if we encounter a 'PACK' chunk
+		// load chunks
+		while (1)
+		{
+			memset( &header, 0, sizeof( ChunkHeader ) );
+			fread( &header, 1, sizeof( ChunkHeader ), file );
+			if (feof( file ) || header.name[0] == 0) break; // assume end of file
+			else if (!strncmp( header.name, "PACK", 4 ))
+			{
+				fread( &frameCount, 1, 4, file );
+			}
+			else if (!strncmp( header.name, "SIZE", 4 ))
+			{
+				if (!frame) frame = new SpriteFrame();
+				fread( &frame->size, 1, 12, file );
+				swap( frame->size.y, frame->size.z ); // sorry Magica, z=up is just wrong
+			}
+			else if (!strncmp( header.name, "XYZI", 4 ))
+			{
+				struct { uchar x, y, z, i; } xyzi;
+				uint N;
+				int3 s = frame->size;
+				fread( &N, 1, 4, file );
+				frame->buffer = (PAYLOAD*)_aligned_malloc( s.x * s.y * s.z * PAYLOADSIZE, 64 ); // B&H'21
+				memset( frame->buffer, 0, s.x * s.y * s.z * PAYLOADSIZE );
+				for (uint i = 0; i < N; i++)
+				{
+					fread( &xyzi, 1, 4, file );
+					frame->buffer[xyzi.x + xyzi.z * s.x + xyzi.y * s.x * s.y] = xyzi.i;
+				}
+				if (newSprite->frame.size() == frameCount) FatalError( "LoadSprite( %s ):\nBad frame count.", voxFile );
+				newSprite->frame.push_back( frame );
+				frame = 0;
+			}
+			else if (!strncmp( header.name, "RGBA", 4 ))
+			{
+				fread( palette, 4, 256, file );
+			}
+			else if (!strncmp( header.name, "MATT", 4 ))
+			{
+				int dummy[8192]; // we are not supporting materials for now.
+				fread( dummy, 1, header.N, file );
+			}
+			else if (!strncmp( header.name, "MATL", 4 ))
+			{
+				int dummy[8192]; // we are not supporting materials for now.
+				fread( dummy, 1, header.N, file );
+			}
+			else if (!strncmp( header.name, "nTRN", 4 ))
+			{
+				int dummy[128]; // we are not supporting the extended world hierarchy for now.
+				fread( dummy, 1, header.N, file );
+			}
+			else if (!strncmp( header.name, "nGRP", 4 ))
+			{
+				int dummy[128]; // we are not supporting the extended world hierarchy for now.
+				fread( dummy, 1, header.N, file );
+			}
+			else if (!strncmp( header.name, "nSHP", 4 ))
+			{
+				int dummy[128]; // we are not supporting the extended world hierarchy for now.
+				fread( dummy, 1, header.N, file );
+			}
+			else if (!strncmp( header.name, "LAYR", 4 ))
+			{
+				int dummy[128]; // we are not supporting the extended world hierarchy for now.
+				fread( dummy, 1, header.N, file );
+			}
+		}
+		fclose( file );
+		// finalize new sprite
+		int3 maxSize = make_int3( 0 );
+		const uint offset = 1; // palShift ? 1 : 0;
+		for (int f = 0; f < frameCount; f++)
+		{
+			// efficient sprite rendering: B&H'21
+			SpriteFrame* frame = newSprite->frame[f];
+			vector<uint> drawList;
+			vector<PAYLOAD> voxel;
+			for (int i = 0, z = 0; z < frame->size.z; z++)
+			{
+				for (int y = 0; y < frame->size.y; y++)
+				{
+					for (int x = 0; x < frame->size.x; x++, i++)
+					{
+						if (frame->buffer[i])
+						{
+							const uint c = palette[frame->buffer[i] - offset];
+						#if PAYLOADSIZE == 1
+							const uint blue = min( 3u, (((c >> 16) & 255) + 31) >> 6 );
+							const uint green = min( 7u, (((c >> 8) & 255) + 15) >> 5 );
+							const uint red = min( 7u, ((c & 255) + 15) >> 5 );
+							const uint p = (red << 5) + (green << 2) + blue;
+							const PAYLOAD v = (p == 0) ? (1 << 5) : p;
+						#else
+							const uint blue = min( 15u, (((c >> 16) & 255) + 7) >> 4 );
+							const uint green = min( 15u, (((c >> 8) & 255) + 7) >> 4 );
+							const uint red = min( 15u, ((c & 255) + 7) >> 4 );
+							const uint p = (red << 8) + (green << 4) + blue;
+							const PAYLOAD v = (p == 0) ? 1 : p;
+						#endif
+							frame->buffer[i] = v;
+							drawList.push_back( x + (y << 10) + (z << 20) );
+							voxel.push_back( frame->buffer[i] );
+						}
+					}
+				}
+			}
+			maxSize.x = max( maxSize.x, frame->size.x );
+			maxSize.y = max( maxSize.y, frame->size.y );
+			maxSize.z = max( maxSize.z, frame->size.z );
+			frame->drawPos = (uint*)_aligned_malloc( drawList.size() * sizeof( uint ), 64 );
+			frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
+			for (size_t s = drawList.size(), i = 0; i < s; i++)
+				frame->drawPos[i] = drawList[i],
+				frame->drawVal[i] = voxel[i];
+			frame->drawListSize = (uint)drawList.size();
+		}
+		// create the backup frame for sprite movement
+		SpriteFrame* backupFrame = new SpriteFrame();
+		backupFrame->size = maxSize;
+		backupFrame->buffer = new PAYLOAD[maxSize.x * maxSize.y * maxSize.z];
+		newSprite->backup = backupFrame;
+		sprite.push_back( newSprite );
+	}
 	// all done, return sprite index
 	return (uint)sprite.size() - 1;
+}
+
+// SpriteManager::SaveSprite
+// ----------------------------------------------------------------------------
+void SpriteManager::SaveSprite( const uint idx, const char* vxFile )
+{
+	if (idx >= sprite.size()) return;
+	// save the sprite to custom file format
+	Sprite* s = sprite[idx];
+	gzFile f = gzopen( vxFile, "wb" );
+	int frames = (int)s->frame.size(), pls = PAYLOADSIZE;
+	gzwrite( f, &pls, 4 );
+	gzwrite( f, &frames, 4 );
+	for (int i = 0; i < frames; i++)
+	{
+		SpriteFrame* sf = s->frame[i];
+		gzwrite( f, &sf->size, 12 );
+		gzwrite( f, &sf->drawListSize, 4 );
+		gzwrite( f, sf->drawPos, sf->drawListSize * sizeof( uint ) );
+		gzwrite( f, sf->drawVal, sf->drawListSize * PAYLOADSIZE );
+	}
+	gzclose( f );
 }
 
 // SpriteManager::CloneSprite
@@ -504,7 +763,7 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 	{
 		SpriteFrame* frame = new SpriteFrame();
 		frame->size = size;
-		vector<uchar4> drawList( voxelsPerFrame / 4 /* estimate */ );
+		vector<uint> drawList( voxelsPerFrame / 4 /* estimate */ );
 		vector<PAYLOAD> voxel( voxelsPerFrame / 4 );
 		frame->buffer = (PAYLOAD*)_aligned_malloc( voxelsPerFrame * PAYLOADSIZE, 64 );
 		for (int x = 0; x < size.x; x++) for (int y = 0; y < size.y; y++) for (int z = 0; z < size.z; z++)
@@ -513,12 +772,12 @@ uint World::CreateSprite( const int3 pos, const int3 size, const int frames )
 			frame->buffer[x + y * size.x + z * size.x * size.y] = v;
 			if (v != 0)
 			{
-				drawList.push_back( make_uchar4( x, y, z, 0 ) );
+				drawList.push_back( x + (y << 10) + (z << 20) );
 				voxel.push_back( v );
 			}
 		}
 		frame->drawListSize = (uint)drawList.size();
-		frame->drawPos = (uchar4*)_aligned_malloc( drawList.size() * sizeof( uchar4 ), 64 );
+		frame->drawPos = (uint*)_aligned_malloc( drawList.size() * sizeof( uint ), 64 );
 		frame->drawVal = (PAYLOAD*)_aligned_malloc( drawList.size() * PAYLOADSIZE, 64 );
 		for (size_t s = drawList.size(), i = 0; i < s; i++)
 			frame->drawPos[i] = drawList[i],
@@ -556,19 +815,14 @@ void World::EraseSprite( const uint idx )
 	const int3 lastPos = sprite[idx]->lastPos;
 	if (lastPos.x == -9999) return;
 	const SpriteFrame* backup = sprite[idx]->backup;
-#if 1
 	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
-	const uchar4* localPos = frame->drawPos;
+	const uint* localPos = frame->drawPos;
 	for (uint i = 0; i < frame->drawListSize; i++)
 	{
-		const uchar4 v = localPos[i];
-		Set( v.x + lastPos.x, v.y + lastPos.y, v.z + lastPos.z, backup->buffer[i] );
+		const uint v = localPos[i];
+		const uint vx = v & 1023, vy = (v >> 10) & 1023, vz = (v >> 20) & 1023;
+		Set( vx + lastPos.x, vy + lastPos.y, vz + lastPos.z, backup->buffer[i] );
 	}
-#else
-	const int3 s = backup->size;
-	for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
-		Set( lastPos.x + u, lastPos.y + v, lastPos.z + w, backup->buffer[i] );
-#endif
 }
 
 // World::DrawSprite (private; called from World::Commit)
@@ -582,28 +836,19 @@ void World::DrawSprite( const uint idx )
 	{
 		const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
 		SpriteFrame* backup = sprite[idx]->backup;
-	#if 1
-		const uchar4* localPos = frame->drawPos;
+		const uint* localPos = frame->drawPos;
 		const PAYLOAD* val = frame->drawVal;
 		for (uint i = 0; i < frame->drawListSize; i++)
 		{
-			const uchar4 v = localPos[i];
-			backup->buffer[i] = Get( v.x + pos.x, v.y + pos.y, v.z + pos.z );
-			Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, val[i] );
+			const uint v = localPos[i];
+			const uint vx = v & 1023, vy = (v >> 10) & 1023, vz = (v >> 20) & 1023;
+			backup->buffer[i] = Get( vx + pos.x, vy + pos.y, vz + pos.z );
+			Set( vx + pos.x, vy + pos.y, vz + pos.z, val[i] );
 		}
-	#else
-		const int3& s = backup->size = frame->size;
-		for (int i = 0, w = 0; w < s.z; w++) for (int v = 0; v < s.y; v++) for (int u = 0; u < s.x; u++, i++)
-		{
-			const uint voxel = frame->buffer[i];
-			backup->buffer[i] = Get( pos.x + u, pos.y + v, pos.z + w );
-			if (voxel != 0) Set( pos.x + u, pos.y + v, pos.z + w, voxel );
-		}
-	#endif
 	}
 	// store this location so we can remove the sprite later
 	sprite[idx]->lastPos = sprite[idx]->currPos;
-	}
+}
 
 // World::DrawSpriteShadow
 // ----------------------------------------------------------------------------
@@ -681,12 +926,13 @@ void World::StampSpriteTo( const uint idx, const uint x, const uint y, const uin
 	const int3& pos = make_int3( x, y, z );
 	if (pos.x == -9999) return;
 	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
-	const uchar4* localPos = frame->drawPos;
+	const uint* localPos = frame->drawPos;
 	const PAYLOAD* val = frame->drawVal;
 	for (uint i = 0; i < frame->drawListSize; i++)
 	{
-		const uchar4 v = localPos[i];
-		Set( v.x + pos.x, v.y + pos.y, v.z + pos.z, val[i] );
+		const uint v = localPos[i];
+		const uint vx = v & 1023, vy = (v >> 10) & 1023, vz = (v >> 20) & 1023;
+		Set( vx + pos.x, vy + pos.y, vz + pos.z, val[i] );
 	}
 }
 
@@ -1004,6 +1250,12 @@ void World::Render()
 	}
 	if (Game::autoRendering)
 	{
+		// backup previous frame data
+		float3 prevE = params.E;
+		float3 prevP0 = params.p0;
+		float3 prevP1 = params.p1;
+		float3 prevP2 = params.p2;
+		float3 prevP3 = prevP1 + (prevP2 - prevP0);
 		// prepare for rendering
 		const mat4 M = camMat;
 		const float aspectRatio = (float)SCRWIDTH / SCRHEIGHT;
@@ -1012,11 +1264,77 @@ void World::Render()
 		params.p0 = TransformPosition( make_float3( aspectRatio, 1, 2.2f ), M );
 		params.p1 = TransformPosition( make_float3( -aspectRatio, 1, 2.2f ), M );
 		params.p2 = TransformPosition( make_float3( aspectRatio, -1, 2.2f ), M );
+		// reprojection data
+		static bool firstFrame = true;
+		if (firstFrame)
+		{
+			prevE = params.E, prevP0 = params.p0;
+			prevP1 = params.p1, prevP2 = params.p2;
+			firstFrame = false;
+		}
+		params.Nleft = make_float4( normalize( cross( prevP0 - prevE, prevP2 - prevE ) ), 0 );
+		params.Nleft.w = dot( prevE, make_float3( params.Nleft ) );
+		params.Nright = make_float4( normalize( cross( prevP3 - prevE, prevP1 - prevE ) ), 0 );
+		params.Nright.w = dot( prevE, make_float3( params.Nright ) );
+		params.Ntop = make_float4( normalize( cross( prevP0 - prevE, prevP1 - prevE ) ), 0 );
+		params.Ntop.w = dot( prevE, make_float3( params.Ntop ) );
+		params.Nbottom = make_float4( normalize( cross( prevP3 - prevE, prevP2 - prevE ) ), 0 );
+		params.Nbottom.w = dot( prevE, make_float3( params.Nbottom ) );
+		params.prevRight = make_float4( normalize( prevP1 - prevP0 ), 0 );
+		params.prevDown = make_float4( normalize( prevP2 - prevP0 ), 0 );
+		params.prevP0 = make_float4( prevP0, 0 );
+		params.prevP1 = make_float4( prevP1, 0 );
+		params.prevP2 = make_float4( prevP2, 0 );
+		params.prevP3 = make_float4( prevP3, 0 );
+		// test
+	#define dot3(a,b) (a.x*b.x+a.y*b.y+a.z*b.z)
+		float3 pixelPos = (params.p1 + params.p0) * 0.5f;
+		float3 D = normalize( pixelPos - params.E );
+		pixelPos = params.E + 10.0f * D;
+		const float dl = dot3( pixelPos, params.prevRight ) - dot3( prevP0, params.prevRight );
+		const float dr = dot3( pixelPos, -params.prevRight ) + dot3( prevP1, params.prevRight );
+		const float dt = dot3( pixelPos, params.prevDown ) - dot3( prevP0, params.prevDown );
+		const float db = dot3( pixelPos, -params.prevDown ) + dot3( prevP2, params.prevDown );
+		const float u_prev = SCRWIDTH * (dl / (dl + dr));
+		const float v_prev = SCRHEIGHT * (dt / (dt + db));
+		int w = 0;
+		// finalize params
 		params.R0 = RandomUInt();
 		params.skyWidth = skySize.x;
 		params.skyHeight = skySize.y;
 		static uint frame = 0;
-		params.frame = frame++;
+		params.frame = frame++ & 255;
+		for (int i = 0; i < 6; i++) params.skyLight[i] = skyLight[i];
+		params.skyLightScale = Game::skyDomeLightScale;
+		// TAA
+	#if 0 // now handled in the GPU code
+	#if TAA == 1
+		static float2* halton = 0;
+		static int jitterFrame = 0;
+		if (!halton)
+		{
+			// precalculate TAA jittering; Halton sequence
+			halton = new float2[16];
+			for (int i = 0; i < 16; i++)
+			{
+				float2 s = make_float2( (float)i, (float)i );
+				float4 a = make_float4( 1, 1, 0, 0 );
+				while (s.x > 0.f && s.y > 0.f)
+					a.x /= 2.0f, a.y /= 3.0f,
+					a.z += a.x * fmod( s.x, 2.0f ), a.w += a.y * fmod( s.y, 3.0f ),
+					s.x = floor( s.x / 2.0f ), s.y = floor( s.y / 3.0f );
+				halton[i] = make_float2( a.z, a.w );
+			}
+			int w = 0;
+		}
+		// apply jitter to params.p0
+		jitterFrame = (jitterFrame + 1) & 15;
+		float3 jitter =
+			halton[jitterFrame].x * (params.p1 - params.p0) * params.oneOverRes.x +
+			halton[jitterFrame].y * (params.p2 - params.p0) * params.oneOverRes.y;
+		params.p0 += jitter; params.p1 += jitter, params.p2 += jitter;
+	#endif
+	#endif
 		// get render parameters to GPU and invoke kernel asynchronously
 		paramBuffer->CopyToDevice( false );
 		if (!screen)
@@ -1024,15 +1342,32 @@ void World::Render()
 			screen = new Buffer( targetTextureID, Buffer::TARGET );
 			renderer->SetArgument( 0, screen );
 			renderer->SetArgument( 1, paramBuffer );
-			renderer->SetArgument( 2, &gridMap );
-			renderer->SetArgument( 3, brickBuffer[0] );
-			renderer->SetArgument( 4, brickBuffer[1] );
-			renderer->SetArgument( 5, brickBuffer[2] );
-			renderer->SetArgument( 6, brickBuffer[3] );
-			renderer->SetArgument( 7, sky );
-			renderer->SetArgument( 8, blueNoise );
+			renderer->SetArgument( 2, tmpFrame );
+			renderer->SetArgument( 3, &gridMap );
+			renderer->SetArgument( 4, brickBuffer[0] );
+			renderer->SetArgument( 5, brickBuffer[1] );
+			renderer->SetArgument( 6, brickBuffer[2] );
+			renderer->SetArgument( 7, brickBuffer[3] );
+			renderer->SetArgument( 8, sky );
+			renderer->SetArgument( 9, blueNoise );
 		}
+		static int histIn = 0, histOut = 1;
+	#if TAA == 0
 		renderer->Run( screen, make_int2( 8, 16 ), 0, &renderDone );
+	#else
+		renderer->Run( screen, make_int2( 8, 16 ) );
+		// renderer->Run2D( make_int2( SCRWIDTH, SCRHEIGHT ), make_int2( 8, 16 ) );
+		finalizer->SetArgument( 0, history[histIn] );
+		finalizer->SetArgument( 1, history[histOut] );
+		finalizer->SetArgument( 2, tmpFrame );
+		finalizer->SetArgument( 3, paramBuffer );
+		finalizer->Run2D( make_int2( SCRWIDTH, SCRHEIGHT ), make_int2( 8, 16 ) );
+		unsharpen->SetArgument( 0, screen );
+		unsharpen->SetArgument( 1, history[histOut] );
+		unsharpen->Run( screen, make_int2( 8, 16 ), 0, &renderDone );
+		// swap
+		swap( histIn, histOut );
+	#endif
 	}
 }
 

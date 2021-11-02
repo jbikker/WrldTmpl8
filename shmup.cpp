@@ -194,6 +194,10 @@ bool Boss::Tick( int worldPos )
 // -----------------------------------------------------------
 void SHMUP::Init()
 {
+	// change the skydome - defaults can be found in precomp.h, class Game
+	skyDomeImage = "assets/sky_17.hdr";
+	skyDomeScale = 0.7f;
+	skyDomeLightScale = 2.0f;
 	// kill the mouse pointer
 	ShowCursor( false );
 	// tell the actors about the main game object
@@ -278,7 +282,7 @@ void SHMUP::NewBullet( int3 pos, int2 vel )
 void SHMUP::UpdateCamera()
 {
 	// default position and target
-	float3 position = make_float3( (cameraPos.x >> 8) - 5.f, 250, 258 );
+	float3 position = make_float3( (cameraPos.x >> 8) - 5.f, 410, 358 );
 	float3 target = make_float3( (float)(cameraPos.x >> 8), (float)(cameraPos.y >> 8), 512 );
 	// camera zoom
 	if (landBlock < 5) position.y = 40, position.z = 250; else if (landBlock < 15)

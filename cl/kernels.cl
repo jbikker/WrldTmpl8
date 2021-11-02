@@ -2,7 +2,7 @@
 #include "cl/trace.cl"
 #include "cl/tools.cl"
 
-float3 render_whitted( const float2 screenPos, __constant struct RenderParams* params,
+float4 render_whitted( const float2 screenPos, __constant struct RenderParams* params,
 #if GRID_IN_3DIMAGE == 1
 	__read_only image3d_t grid,
 #else
@@ -13,22 +13,29 @@ float3 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 {
 	// basic AA
 	float3 pixel = (float3)(0);
+	float dist; // TAA will use distance of the last sample; it should be the only one.
 	for (int u = 0; u < AA_SAMPLES; u++) for (int v = 0; v < AA_SAMPLES; v++)
 	{
 		// trace primary ray
-		float dist;
 		float3 N;
 		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
 		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 		// simple hardcoded directional lighting using arbitrary unit vector
-		if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight );
+		if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
 		const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
-		pixel += BRDF1 * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
+		float4 sky;
+		if (N.x < -0.9f) sky = params->skyLight[0];
+		if (N.x > 0.9f) sky = params->skyLight[1];
+		if (N.y < -0.9f) sky = params->skyLight[2];
+		if (N.y > 0.9f) sky = params->skyLight[3];
+		if (N.z < -0.9f) sky = params->skyLight[4];
+		if (N.z > 0.9f) sky = params->skyLight[5];
+		pixel += BRDF1 * params->skyLightScale * sky.xyz; // 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
 	}
-	return pixel * (1.0f / (AA_SAMPLES * AA_SAMPLES));
+	return (float4)(pixel * (1.0f / (AA_SAMPLES * AA_SAMPLES)), dist);
 }
 
-float3 render_gi( const float2 screenPos, __constant struct RenderParams* params,
+float4 render_gi( const float2 screenPos, __constant struct RenderParams* params,
 #if GRID_IN_3DIMAGE == 1
 	__read_only image3d_t grid,
 #else
@@ -42,9 +49,10 @@ float3 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	float3 N;
 	const float3 D = GenerateCameraRay( screenPos, params );
 	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+	const float skyLightScale = params->skyLightScale;
 
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
-	if (voxel == 0) return SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight );
+	if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ),1e20f);
 	const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
 	float3 incoming = (float3)(0, 0, 0);
 	const int x = (int)screenPos.x, y = (int)screenPos.y;
@@ -57,14 +65,34 @@ float3 render_gi( const float2 screenPos, __constant struct RenderParams* params
 		const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
 		float3 N2;
 		float dist2;
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 /* cap on GI ray length */ );
-		if (voxel2 == 0) incoming += 8 * SampleSky( (float)(R.x, R.z, R.y), sky, params->skyWidth, params->skyHeight ); else /* secondary hit */
-			incoming += INVPI * ToFloatRGB( voxel2 ) * 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
+		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
+		if (0 /* for comparing against ground truth */) // get_global_id( 0 ) % SCRWIDTH < SCRWIDTH / 2)
+		{
+			if (voxel2 == 0) incoming += skyLightScale * SampleSky( (float3)(R.x, R.z, R.y), sky, params->skyWidth, params->skyHeight ); else /* secondary hit */
+			{
+				const float4 R2 = (float4)(DiffuseReflectionCosWeighted( r0, r1, N2 ), 1);
+				incoming += INVPI * ToFloatRGB( voxel2 ) * skyLightScale * SampleSky( (float3)(R2.x, R2.z, R2.y), sky, params->skyWidth, params->skyHeight );
+			}
+		}
+		else
+		{
+			float3 toAdd = (float3)skyLightScale, M = N;
+			if (voxel2 != 0) toAdd *= INVPI * ToFloatRGB( voxel2 ), M = N2;
+			float4 sky;
+			if (M.x < -0.9f) sky = params->skyLight[0];
+			if (M.x > 0.9f) sky = params->skyLight[1];
+			if (M.y < -0.9f) sky = params->skyLight[2];
+			if (M.y > 0.9f) sky = params->skyLight[3];
+			if (M.z < -0.9f) sky = params->skyLight[4];
+			if (M.z > 0.9f) sky = params->skyLight[5];
+			incoming += toAdd * sky.xyz;
+		}
 	}
-	return BRDF1 * incoming * (1.0f / GIRAYS);
+	return (float4)(BRDF1 * incoming * (1.0f / GIRAYS), dist);
 }
 
 __kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
+	__global float4* frame,
 #if GRID_IN_3DIMAGE == 1
 	__read_only image3d_t grid,
 #else
@@ -77,14 +105,99 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	const int x = get_global_id( 0 );
 	const int y = get_global_id( 1 );
 #if GIRAYS == 0
-	const float3 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
 #else
-	const float3 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
 #endif
-	write_imagef( outimg, (int2)(x, y), (float4)(pixel, 1) );
+#if TAA == 1
+	// store pixel in linear color space for next frame
+	frame[x + y * SCRWIDTH] = pixel; // depth in w
+#else
+	// finalize pixel
+	write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( pixel.xyz, 1 ) ), 1) );
+#endif
 }
 
-__kernel void traceBatch( 
+__kernel void finalize( __global float4* prevFrameIn, __global float4* prevFrameOut,
+	__global float4* frame, __constant struct RenderParams* params )
+{
+	const int x = get_global_id( 0 );
+	const int y = get_global_id( 1 );
+	// get history and current frame pixel
+#if 0
+	// just fetch the same pixel
+	float3 hist = prevFrameIn[x + y * SCRWIDTH].xyz;
+#else
+	// calculate u_prev, v_prev
+	const float4 pixelData = frame[x + y * SCRWIDTH];
+	const float2 uv = (float2)((float)x / (float)SCRWIDTH, (float)y / (float)SCRHEIGHT);
+	float3 pixelPos = params->p0 + (params->p1 - params->p0) * uv.x + (params->p2 - params->p0) * uv.y;
+	const float3 D = normalize( pixelPos - params->E );
+	pixelPos = params->E + pixelData.w * D;
+	const float dl = dot( pixelPos, params->Nleft.xyz ) - params->Nleft.w;
+	const float dr = dot( pixelPos, params->Nright.xyz ) - params->Nright.w;
+	const float dt = dot( pixelPos, params->Ntop.xyz ) - params->Ntop.w;
+	const float db = dot( pixelPos, params->Nbottom.xyz ) - params->Nbottom.w;
+	const float u_prev = SCRWIDTH * (dl / (dl + dr));
+	const float v_prev = SCRHEIGHT * (dt / (dt + db));
+	float3 hist = bilerpSample( prevFrameIn, u_prev, v_prev );
+#endif
+	const float3 pixel = RGBToYCoCg( pixelData.xyz );
+	// determine color neighborhood
+	int x1 = max( 0, x - 1 ), y1 = max( 0, y - 1 ), x2 = min( SCRWIDTH - 1, x + 1 ), y2 = min( SCRHEIGHT - 1, y + 1 );
+#if 0
+	// basic neighborhood determination
+	float3 minColor = pixel, maxColor = pixel;
+	for (int y = y1; y <= y2; y++) for (int x = x1; x <= x2; x++)
+	{
+		const float3 p = RGBToYCoCg( frame[x + y * SCRWIDTH].xyz );
+		minColor = min( minColor, p ), maxColor = max( maxColor, p );
+	}
+#else
+	// advanced neighborhood determination
+	float3 colorAvg = (float3)0;
+	float3 colorVar = colorAvg;
+	for (int y = y1; y <= y2; y++) for (int x = x1; x <= x2; x++)
+	{
+		const float3 p = RGBToYCoCg( frame[x + y * SCRWIDTH].xyz );
+		colorAvg += p, colorVar += p * p;
+	}
+	colorAvg *= 1.0f / 9.0f;
+	colorVar *= 1.0f / 9.0f;
+	float3 sigma = max( (float3)0, colorVar - (colorAvg * colorAvg) );
+	sigma.x = sqrt( sigma.x );
+	sigma.y = sqrt( sigma.y );
+	sigma.z = sqrt( sigma.z );
+	const float3 minColor = colorAvg - 1.25f * sigma;
+	const float3 maxColor = colorAvg + 1.25f * sigma;
+#endif
+	hist = clamp( RGBToYCoCg( hist ), minColor, maxColor );
+	// final blend
+	const float3 color = YCoCgToRGB( 0.9f * hist + 0.1f * pixel );
+	prevFrameOut[x + y * SCRWIDTH] = (float4)(color, 1);
+	// write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( color, 1 ) ), 1) );
+}
+
+__kernel void unsharpen( write_only image2d_t outimg, __global float4* pixels )
+{
+	const int x = get_global_id( 0 );
+	const int y = get_global_id( 1 );
+	if (x == 0 || y == 0 || x >= SCRWIDTH - 1 || y >= SCRHEIGHT - 1) return;
+	const float4 p0 = pixels[x - 1 + (y - 1) * SCRWIDTH];
+	const float4 p1 = pixels[x + (y - 1) * SCRWIDTH];
+	const float4 p2 = pixels[x + 1 + (y - 1) * SCRWIDTH];
+	const float4 p3 = pixels[x + 1 + y * SCRWIDTH];
+	const float4 p4 = pixels[x + 1 + (y + 1) * SCRWIDTH];
+	const float4 p5 = pixels[x + (y + 1) * SCRWIDTH];
+	const float4 p6 = pixels[x - 1 + (y + 1) * SCRWIDTH];
+	const float4 p7 = pixels[x - 1 + y * SCRWIDTH];
+	const float4 color = max( pixels[x + y * SCRWIDTH], pixels[x + y * SCRWIDTH] *
+		2.7f - 0.5f * (0.35f * p0 + 0.5f * p1 + 0.35f * p2 +
+			0.5f * p3 + 0.35f * p4 + 0.5f * p5 + 0.35f * p6 + 0.5f * p7) );
+	write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( color.xyz, 1 ) ), 1) );
+}
+
+__kernel void traceBatch(
 	__read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3,
@@ -99,10 +212,10 @@ __kernel void traceBatch(
 	// trace ray
 	float3 N;
 	float dist;
-	const uint voxel = TraceRay( 
-		(float4)( O4.x, O4.y, O4.z, 1 ), 
-		(float4)( D4.x, D4.y, D4.z, 1 ),
-		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999 
+	const uint voxel = TraceRay(
+		(float4)(O4.x, O4.y, O4.z, 1),
+		(float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999
 	);
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
@@ -137,7 +250,7 @@ __kernel void findHermits( __global unsigned int* grid )
 	if (x < 1 || y < 1 || z < 1 || x > 126 || y > 126 || z > 126) return; // skip edges
 	// count empty cells in a 3x3x3 cube
 	int empty = 0;
-	for( int u = -1; u <= 1; u++ ) for( int v = -1; v <= 1; v++ ) for( int w = -1; w <= 1; w++ )
+	for (int u = -1; u <= 1; u++) for (int v = -1; v <= 1; v++) for (int w = -1; w <= 1; w++)
 		if ((grid[task + u + v * 128 + w * 128 * 128] & 0xffffff) == 0) empty++;
 	// if they're all empty, this cell allows skipping
 	if (empty == 27) grid[task] |= 1 << 30;

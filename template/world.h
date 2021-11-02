@@ -31,9 +31,9 @@ public:
 	~SpriteFrame() { _aligned_free( buffer ); }
 	PAYLOAD* buffer = 0;				// full frame buffer (width * height * depth)
 	int3 size = make_int3( 0 );			// size of the sprite over x, y and z
-	uchar4* drawPos;					// compacted list of opaque sprite voxel positions
-	PAYLOAD* drawVal;					// compacted list of opaque sprite voxel values
-	uint drawListSize;					// number of voxels in buffer2
+	uint* drawPos = 0;					// compacted list of opaque sprite voxel positions
+	PAYLOAD* drawVal = 0;				// compacted list of opaque sprite voxel values
+	uint drawListSize = 0;				// number of voxels in buffer2
 };
 
 class Sprite
@@ -60,7 +60,8 @@ public:
 		if (!spriteManager) spriteManager = new SpriteManager();
 		return spriteManager;
 	}
-	uint LoadSprite( const char* voxFile, bool palShift = true );
+	uint LoadSprite( const char* voxFile, bool largeModel = false );
+	void SaveSprite( const uint idx, const char* vxFile );
 	uint CloneSprite( const uint idx );
 	vector<Sprite*> sprite;				// list of loaded sprites
 private:
@@ -167,6 +168,8 @@ public:
 	void Clear();
 	void DummyWorld();
 	void LoadSky( const char* filename, const float scale = 1.0f );
+	float3 SampleSky( const float3& D );
+	void UpdateSkylights(); // updates the six skylight colors
 	void ForceSyncAllBricks();
 	// camera
 	void SetCameraMatrix( const mat4& m ) { camMat = m; }
@@ -419,11 +422,14 @@ private:
 	uint targetTextureID = 0;			// OpenGL render target
 	int prevFrameIdx = 0;				// index of the previous frame buffer that will be used for TAA
 	Buffer* paramBuffer = 0;			// OpenCL buffer that stores renderer parameters
+	Buffer* history[2] = { 0 };			// OpenCL buffers for history data (previous frame)
+	Buffer* tmpFrame = 0;				// OpenCL buffer to store rendered frame in linear color space
 	Buffer* sky = 0;					// OpenCL buffer for a HDR skydome
 	Buffer* blueNoise = 0;				// blue noise data
 	int2 skySize;						// size of the skydome bitmap
 	RenderParams params;				// CPU-side copy of the renderer parameters
 	Kernel* renderer, * committer;		// render kernel and commit kernel
+	Kernel* finalizer, *unsharpen;		// TAA finalization kernels
 	Kernel* batchTracer;				// ray batch tracing kernel for inline tracing
 #if CELLSKIPPING == 1
 	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
@@ -439,6 +445,7 @@ private:
 	cl_mem gridMap;						// device-side 3D image or buffer for top-level
 	Surface* font;						// bitmap font for print command
 	bool firstFrame = true;				// for doing things in the first frame
+	float4 skyLight[6];					// integrated light for the 6 possible normals
 };
 
 } // namespace Tmpl8

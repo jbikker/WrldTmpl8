@@ -17,6 +17,7 @@
 #include <math.h>
 #include <algorithm>
 #include <assert.h>
+#include <io.h>
 
 #include "bluenoise.h"
 #include "lib/stb_image.h"
@@ -120,12 +121,12 @@ public:
 #endif
 
 // vector type placeholders, carefully matching OpenCL's layout and alignment
-struct ALIGN( 8 ) int2 { int x, y; };
-struct ALIGN( 8 ) uint2 { uint x, y; };
-struct ALIGN( 8 ) float2 { float x, y; };
-struct ALIGN( 16 ) int3 { int x, y, z; int dummy; };
-struct ALIGN( 16 ) uint3 { uint x, y, z; uint dummy; };
-struct ALIGN( 16 ) float3 { float x, y, z; float dummy; };
+struct ALIGN( 8 ) int2 { int2() = default; int2( int a, int b ) : x( a ), y( b ) {} int x, y; };
+struct ALIGN( 8 ) uint2 { uint2() = default; uint2( int a, int b ) : x( a ), y( b ) {} uint x, y; };
+struct ALIGN( 8 ) float2 { float2() = default; float2( float a, float b ) : x( a ), y( b ) {} float x, y; };
+struct ALIGN( 16 ) int3 { int3() = default; int3( int a, int b, int c ) : x( a ), y( b ), z( c ) {} int x, y, z; int dummy; };
+struct ALIGN( 16 ) uint3 { uint3() = default; uint3( uint a, uint b, uint c ) : x( a ), y( b ), z( c ) {} uint x, y, z; uint dummy; };
+struct ALIGN( 16 ) float3 { float3() = default; float3( float a, float b, float c ) : x( a ), y( b ), z( c ) {} float x, y, z; float dummy; };
 struct ALIGN( 16 ) int4 { int x, y, z, w; };
 struct ALIGN( 16 ) uint4 { uint x, y, z, w; };
 struct ALIGN( 16 ) float4 { float x, y, z, w; };
@@ -305,6 +306,7 @@ inline int3 make_int3( int2 a ) { return make_int3( a.x, a.y, 0 ); }
 inline int3 make_int3( int2 a, int s ) { return make_int3( a.x, a.y, s ); }
 inline int3 make_int3( uint3 a ) { return make_int3( int( a.x ), int( a.y ), int( a.z ) ); }
 inline int3 make_int3( float3 a ) { return make_int3( int( a.x ), int( a.y ), int( a.z ) ); }
+inline int3 make_int3( float4 a ) { return make_int3( int( a.x ), int( a.y ), int( a.z ) ); }
 inline uint3 make_uint3( uint a, uint b, uint c ) { uint3 u3; u3.x = a, u3.y = b, u3.z = c; return u3; }
 inline uint3 make_uint3( uint s ) { return make_uint3( s, s, s ); }
 inline uint3 make_uint3( uint2 a ) { return make_uint3( a.x, a.y, 0 ); }
@@ -315,6 +317,7 @@ inline float4 make_float4( float a, float b, float c, float d ) { float4 f4; f4.
 inline float4 make_float4( float s ) { return make_float4( s, s, s, s ); }
 inline float4 make_float4( float3 a ) { return make_float4( a.x, a.y, a.z, 0.0f ); }
 inline float4 make_float4( float3 a, float w ) { return make_float4( a.x, a.y, a.z, w ); }
+inline float4 make_float4( int3 a, float w ) { return make_float4( (float)a.x, (float)a.y, (float)a.z, w ); }
 inline float4 make_float4( int4 a ) { return make_float4( float( a.x ), float( a.y ), float( a.z ), float( a.w ) ); }
 inline float4 make_float4( uint4 a ) { return make_float4( float( a.x ), float( a.y ), float( a.z ), float( a.w ) ); }
 inline int4 make_int4( int a, int b, int c, int d ) { int4 i4; i4.x = a, i4.y = b, i4.z = c, i4.w = d; return i4; }
@@ -617,6 +620,10 @@ inline float length( float2 v ) { return sqrtf( dot( v, v ) ); }
 inline float length( float3 v ) { return sqrtf( dot( v, v ) ); }
 inline float length( float4 v ) { return sqrtf( dot( v, v ) ); }
 
+inline float length( int2 v ) { return sqrtf( (float)dot( v, v ) ); }
+inline float length( int3 v ) { return sqrtf( (float)dot( v, v ) ); }
+inline float length( int4 v ) { return sqrtf( (float)dot( v, v ) ); }
+
 inline float2 normalize( float2 v ) { float invLen = rsqrtf( dot( v, v ) );	return v * invLen; }
 inline float3 normalize( float3 v ) { float invLen = rsqrtf( dot( v, v ) );	return v * invLen; }
 inline float4 normalize( float4 v ) { float invLen = rsqrtf( dot( v, v ) );	return v * invLen; }
@@ -741,7 +748,16 @@ public:
 	{
 		for (int i = 0; i < 16; i++) if (m.cell[i] != cell[i]) return false; return true;
 	}
-	float3 GetTranslation() { return make_float3( cell[3], cell[7], cell[11] ); }
+	float3 GetTranslation() const { return make_float3( cell[3], cell[7], cell[11] ); }
+	static mat4 FromColumnMajor( const mat4& T )
+	{
+		mat4 M;
+		M.cell[0] = T.cell[0], M.cell[1] = T.cell[4], M.cell[2] = T.cell[8], M.cell[3] = T.cell[12];
+		M.cell[4] = T.cell[1], M.cell[5] = T.cell[5], M.cell[6] = T.cell[9], M.cell[7] = T.cell[13];
+		M.cell[8] = T.cell[2], M.cell[9] = T.cell[6], M.cell[10] = T.cell[10], M.cell[11] = T.cell[14];
+		M.cell[12] = T.cell[3], M.cell[13] = T.cell[7], M.cell[14] = T.cell[11], M.cell[15] = T.cell[15];
+		return M;
+	}
 	constexpr static mat4 Identity() { return mat4{}; }
 	static mat4 ZeroMatrix() { mat4 r; memset( r.cell, 0, 64 ); return r; }
 	static mat4 RotateX( const float a ) { mat4 r; r.cell[5] = cosf( a ); r.cell[6] = -sinf( a ); r.cell[9] = sinf( a ); r.cell[10] = cosf( a ); return r; };
@@ -1091,18 +1107,18 @@ public:
 // #include "my_include.h"
 
 // structures for inline batch tracing
-struct Ray 
-{ 
+struct Ray
+{
 	union { float3 O; struct { float d1, d2, d3, t; }; };
 	union { float3 D; struct { uint u1, u2, u3, pixelIdx; }; };
 };
-struct Intersection 
-{ 
+struct Intersection
+{
 	// data
-	float t; uint N; 
+	float t; uint N;
 	// access
 	float GetDistance() { return t; }
-	float3 GetNormal() { return make_float3( ((int)N & 3) - 1.0f, (((int)N >> 2) & 3) - 1.0f, (((int)N >> 4) & 3) - 1.0f ); } 
+	float3 GetNormal() { return make_float3( ((int)N & 3) - 1.0f, (((int)N >> 2) & 3) - 1.0f, (((int)N >> 4) & 3) - 1.0f ); }
 	uint GetVoxel() { return N >> 16; }
 };
 
@@ -1132,17 +1148,27 @@ public:
 	// then be processed on the CPU to produce the final pixels. More control, but also more responsibility.
 	static inline bool autoRendering = true;
 	// checkerBoard:
-	// If enabled (default), the bottom half of the skydome is replaced by a procedurally generated checkerboard
-	// pattern. The code for this can be found in World::LoadSky in world.cpp. Replacing this code by something
-	// of your own should be quite doable.
+	// If enabled (disabled by default), the bottom half of the skydome is replaced by a procedurally generated 
+	// checkerboard pattern. The code for this can be found in World::LoadSky in world.cpp. Replacing this code 
+	// by something of your own should be quite doable.
 	// When disabled, the full original skydome is visible.
 	static inline bool checkerBoard = false;
+	// debugLights:
+	// If enabled (disabled by default), bright lights are added to the skydome to aid in debugging GI code.
+	// Intended for engine core developers.
+	static inline bool debugLights = false;
+	// artificialSun:
+	// If enabled (disabled by default), a 'sun' image is painted into the skydome. This is to get some serious
+	// light intensity in sky_21.hdr, which is pretty useless as a skylight otherwise.
+	static inline bool artificialSun = true;
 	// HDR skydome:
 	// Specifies the skydome image to load. Must be an equiangular bitmap stored as .hdr file with 12 bytes per
 	// pixel. A collection of these can be found online at http://www.hdrlabs.com/sibl/archive.html. Additional
-	// bitmaps can be found via https://cgtricks.com/list-sites-free-hdri .
+	// bitmaps can be found via https://cgtricks.com/list-sites-free-hdri and https://polyhaven.com/hdris.
 	// It is advisable to use a high resolution image of 5000x2500 pixels or larger.
-	static inline string skyDomeImage = "assets/sky_17.hdr";
+	static inline string skyDomeImage = "assets/sky_21.hdr";
+	static inline float skyDomeScale = 1.5f;		// brightness scale for the image
+	static inline float skyDomeLightScale = 10.0f;	// brightness scale for the dome in rendering
 };
 
 // EOF

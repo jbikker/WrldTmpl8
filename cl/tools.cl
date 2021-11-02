@@ -62,10 +62,30 @@ float3 PaniniProjection( float2 tc, const float fov, const float d )
 	return (float3)(sinPhi, tanTheta, cosPhi) * s;
 }
 
+const float halton[32] = { 
+	0, 0, 0.5f, 0.333333f, 0, 0.6666666f, 0.75f, 0.111111111f, 0, 0.44444444f, 
+	0.5f, 0.7777777f, 0.25f, 0.222222222f, 0.75f, 0.55555555f, 0, 0.88888888f, 
+	0.5f, 0.03703703f, 0.25f, 0.37037037f, 0.75f, 0.70370370f, 0.125f, 0.148148148f,
+	0.625f, 0.481481481f, 0.375f, 0.814814814f, 0.875f, 0.259259259f 
+};
+
 // produce a camera ray direction for a position in screen space
 float3 GenerateCameraRay( const float2 pixelPos, __constant struct RenderParams* params )
 {
-	const float2 uv = (float2)(pixelPos.x * params->oneOverRes.x, pixelPos.y * params->oneOverRes.y);
+#if TAA
+	const uint px = (uint)pixelPos.x;
+	const uint py = (uint)pixelPos.y;
+	const uint h = (params->frame + (px & 3) + 4 * (py & 3)) & 15;
+	const float2 uv = (float2)(
+		(pixelPos.x + halton[h * 2 + 0]) * params->oneOverRes.x, 
+		(pixelPos.y + halton[h * 2 + 1]) * params->oneOverRes.y
+	);
+#else
+	const float2 uv = (float2)(
+		pixelPos.x * params->oneOverRes.x, 
+		pixelPos.y * params->oneOverRes.y
+	);
+#endif
 #if PANINI
 	const float3 V = PaniniProjection( (float2)(uv.x * 2 - 1, (uv.y * 2 - 1) * ((float)SCRHEIGHT / SCRWIDTH)), PI / 5, 0.15f );
 	// multiply by improvised camera matrix
@@ -102,4 +122,81 @@ float3 ToFloatRGB( const uint v )
 #else
 	return (float3)(((v >> 8) & 15) * (1.0f / 15.0f), ((v >> 4) & 15) * (1.0f / 15.0f), (v & 15) * (1.0f / 15.0f));
 #endif
+}
+
+// ACES filmic tonemapping, via https://www.shadertoy.com/view/3sfBWs
+float3 ACESFilm( const float3 x )
+{
+	float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
+	return clamp( (x * (a * x + b)) / (x * (c * x + d) + e), 0.0f, 1.0f );
+}
+
+// Reinhard2 tonemapping, via https://www.shadertoy.com/view/WdjSW3
+float3 Reinhard2( const float3 x )
+{
+	const float3 L_white = (float3)4.0f;
+	return (x * (1.0f + x / (L_white * L_white))) / (1.0f + x);
+}
+
+// https://twitter.com/jimhejl/status/633777619998130176
+float3 ToneMapFilmic_Hejl2015(const float3 hdr, float whitePt) 
+{
+    float4 vh = (float4)(hdr, whitePt);
+    float4 va = 1.425f * vh + 0.05f;
+    float4 vf = (vh * va + 0.004f) / (vh * (va + 0.55f) + 0.0491f) - 0.0821f;
+    return vf.rgb / vf.www;
+}
+
+// Linear to SRGB, also via https://www.shadertoy.com/view/3sfBWs
+float3 LessThan( const float3 f, float value )
+{
+	return (float3)(
+		(f.x < value) ? 1.0f : 0.0f,
+		(f.y < value) ? 1.0f : 0.0f,
+		(f.z < value) ? 1.0f : 0.0f);
+}
+float3 LinearToSRGB( const float3 rgb )
+{
+#if 0
+	return sqrt( rgb );
+#else
+	const float3 _rgb = clamp( rgb, 0.0f, 1.0f );
+	return mix( pow( _rgb * 1.055f, (float3)(1.f / 2.4f) ) - 0.055f,
+		_rgb * 12.92f, LessThan( _rgb, 0.0031308f )
+	);
+#endif
+}
+
+// conversions between RGB and YCoCG for TAA
+float3 RGBToYCoCg( const float3 RGB )
+{
+	const float3 rgb = min( (float3)( 4 ), RGB ); // clamp helps AA for strong HDR
+	const float Y = dot( rgb, (float3)( 1, 2, 1 ) ) * 0.25f;
+	const float Co = dot( rgb, (float3)( 2, 0, -2 ) ) * 0.25f + (0.5f * 256.0f / 255.0f);
+	const float Cg = dot( rgb, (float3)( -1, 2, -1 ) ) * 0.25f + (0.5f * 256.0f / 255.0f);
+	return (float3)( Y, Co, Cg );
+}
+
+float3 YCoCgToRGB( const float3 YCoCg )
+{
+	const float Y = YCoCg.x;
+	const float Co = YCoCg.y - (0.5f * 256.0f / 255.0f);
+	const float Cg = YCoCg.z - (0.5f * 256.0f / 255.0f);
+	return (float3)( Y + Co - Cg, Y + Cg, Y - Co - Cg );
+}
+
+// sample a color buffer with bilinear interpolation
+float3 bilerpSample( const __global float4* buffer, const float u, const float v )
+{
+	// do a bilerp fetch at u_prev, v_prev
+	float fu = u - floor( u ), fv = v - floor( v );
+	int iu = (int)u, iv = (int)v;
+	if (iu == 0 || iv == 0 || iu >= SCRWIDTH - 1 || iv >= SCRHEIGHT - 1) return (float3)0;
+	int iu0 = clamp( iu, 0, SCRWIDTH - 1 ), iu1 = clamp( iu + 1, 0, SCRWIDTH - 1 );
+	int iv0 = clamp( iv, 0, SCRHEIGHT - 1 ), iv1 = clamp( iv + 1, 0, SCRHEIGHT - 1 );
+	float4 p0 = (1 - fu) * (1 - fv) * buffer[iu0 + iv0 * SCRWIDTH];
+	float4 p1 = fu * (1 - fv) * buffer[iu1 + iv0 * SCRWIDTH];
+	float4 p2 = (1 - fu) * fv * buffer[iu0 + iv1 * SCRWIDTH];
+	float4 p3 = fu * fv * buffer[iu1 + iv1 * SCRWIDTH];
+	return (p0 + p1 + p2 + p3).xyz;
 }

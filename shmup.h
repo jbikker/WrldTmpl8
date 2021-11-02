@@ -162,7 +162,7 @@ private:
 	int shipSprite, option1Sprite, option2Sprite, laserSprite, bulletSprite, bossSprite;
 	int rockSprite[8], rockDebris[8], mnltSprite[8], enemySprite[8];
 	int turretSprite[8];
-	int3 cameraPos = make_int3( 512 << 8, 70 << 8, 512 << 8 );
+	int3 cameraPos = make_int3( 462 << 8, 70 << 8, 512 << 8 );
 	int3 relPos = make_int3( 0 );
 	int gunDelay = 0, gun = 0, laserPtr = 0;
 	float3 option1Pos = make_float3( -9999 ), option2Pos;

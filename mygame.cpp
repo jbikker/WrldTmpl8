@@ -3,19 +3,18 @@
 
 Game* CreateGame() { return new MyGame(); }
 
-uint sprite, frame = 0;
+uint ship, corvette, frame = 0;
 
 // -----------------------------------------------------------
 // Initialize the application
 // -----------------------------------------------------------
 void MyGame::Init()
 {
-    // This function is for functionality that you only want to run once,
-    // at the start of your game. You can setup the scene here, load some
-    // sprites, and so on.
+	// change the skydome - defaults can be found in precomp.h, class Game
+	skyDomeImage = "assets/sky_17.hdr";
+	skyDomeScale = 0.7f;
+	// clear world geometry
 	ClearWorld();
-    sprite = LoadSprite( "assets/rock.vox" ); // this one has 32 frames
-    LookAt( make_float3( 280, 128, 50 ), make_float3( 320, 128, 512 ) );
 }
 
 // -----------------------------------------------------------
@@ -23,9 +22,16 @@ void MyGame::Init()
 // -----------------------------------------------------------
 void MyGame::Tick( float deltaTime )
 {
-	// This function gets called once per frame by the template code.
-	Print( "Hello World!", 280, 128, 512, 1 );
-	MoveSpriteTo( sprite, 320, 80, 512 );
-	SetSpriteFrame( sprite, frame / 4 );
-	frame = (frame + 1) % 128;
+	// free cam controls
+	static float3 D( 0, 0, 1 ), O( 512, 512, 512 );
+	float3 tmp( 0, 1, 0 ), right = normalize( cross( tmp, D ) ), up = cross( D, right );
+	float speed = deltaTime * 0.1f;
+	if (GetAsyncKeyState( 'W' )) O += speed * D; else if (GetAsyncKeyState( 'S' )) O -= speed * D;
+	if (GetAsyncKeyState( 'A' )) O -= speed * right; else if (GetAsyncKeyState( 'D' )) O += speed * right;
+	if (GetAsyncKeyState( 'R' )) O += speed * up; else if (GetAsyncKeyState( 'F' )) O -= speed * up;
+	if (GetAsyncKeyState( VK_LEFT )) D = normalize( D - right * 0.025f * speed );
+	if (GetAsyncKeyState( VK_RIGHT )) D = normalize( D + right * 0.025f * speed );
+	if (GetAsyncKeyState( VK_UP )) D = normalize( D - up * 0.025f * speed );
+	if (GetAsyncKeyState( VK_DOWN )) D = normalize( D + up * 0.025f * speed );
+	LookAt( O, O + D );
 }

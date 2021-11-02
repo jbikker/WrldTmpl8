@@ -32,13 +32,16 @@
 #endif
 
 // renderer performance setting: set to 0 for slower devices, up to 8 for fast GPUs
-#define GIRAYS		0
+#define GIRAYS		6
 
 // Panini projection, http://tksharpless.net/vedutismo/Pannini/panini.pdf via https://www.shadertoy.com/view/Wt3fzB
-#define PANINI		0
+#define PANINI		0	// 0 to disable, 1 to enable
+
+// TAA, as in https://www.shadertoy.com/view/3sfBWs
+#define TAA			1	// 0 to disable, 1 to enable
 
 // MSAA
-#define AA_SAMPLES	1	// note: will be squared
+#define AA_SAMPLES	1	// 1 to disable, 2..4 to enable. Note: will be squared.
 
 // some useful color names
 #ifdef VOXEL8
@@ -74,6 +77,12 @@ struct RenderParams
 	float3 E, p0, p1, p2;
 	uint R0, frame;
 	uint skyWidth, skyHeight;
+	float4 skyLight[6];
+	float skyLightScale, dummy1, dummy2, dummy3;
+	// reprojection data
+	float4 Nleft, Nright, Ntop, Nbottom;
+	float4 prevRight, prevDown;
+	float4 prevP0, prevP1, prevP2, prevP3;
 };
 
 // lighting for 6 normals for sky15.hdr
