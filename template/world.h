@@ -336,69 +336,56 @@ private:
 	void ClearMarks32( const uint idx ) { modified[idx] = 0; }
 	void ClearMarks() { memset( modified, 0, (BRICKCOUNT / 32) * 4 ); }
 	// helpers
-#if 1
-	// this version: CO'21
 	__forceinline static void StreamCopy( __m256i* dst, const __m256i* src, const uint bytes )
 	{
 		// https://stackoverflow.com/questions/2963898/faster-alternative-to-memcpy
 		assert( (bytes & 31) == 0 );
-		// AVX2
-		uint N = bytes / 32;
-		constexpr uint registers = 8;
-		uint unalignedStep = N % registers;
-		for (; N > 0 && unalignedStep > 0; N--, unalignedStep--, src++, dst++)
+		if (!InstructionSet::AVX2)
 		{
-			const __m256i d = _mm256_stream_load_si256( src );
-			_mm256_stream_si256( dst, d );
+			// fallback: no AVX2, use SSE 4.2
+			uint N = bytes / 16;
+			const __m128i* src4 = (__m128i*)src;
+			__m128i* dst4 = (__m128i*)dst;
+			for (; N > 0; N--, src4++, dst4++)
+			{
+				const __m128i d = _mm_stream_load_si128( src4 );
+				_mm_stream_si128( dst4, d );
+			}
 		}
-		static_assert(registers == 8);
-		for (; N > 0; N -= registers)
+		else
 		{
-			// Based on https://stackoverflow.com/questions/62419256/how-can-i-determine-how-many-avx-registers-my-processor-has
-			const __m256i d0 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d0 );
-			const __m256i d1 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d1 );
-			const __m256i d2 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d2 );
-			const __m256i d3 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d3 );
-			const __m256i d4 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d4 );
-			const __m256i d5 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d5 );
-			const __m256i d6 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d6 );
-			const __m256i d7 = _mm256_stream_load_si256( src++ );
-			_mm256_stream_si256( dst++, d7 );
+			// AVX2 path - this version: CO'21
+			uint N = bytes / 32;
+			constexpr uint registers = 8;
+			uint unalignedStep = N % registers;
+			for (; N > 0 && unalignedStep > 0; N--, unalignedStep--, src++, dst++)
+			{
+				const __m256i d = _mm256_stream_load_si256( src );
+				_mm256_stream_si256( dst, d );
+			}
+			static_assert(registers == 8);
+			for (; N > 0; N -= registers)
+			{
+				// Based on https://stackoverflow.com/questions/62419256/how-can-i-determine-how-many-avx-registers-my-processor-has
+				const __m256i d0 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d0 );
+				const __m256i d1 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d1 );
+				const __m256i d2 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d2 );
+				const __m256i d3 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d3 );
+				const __m256i d4 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d4 );
+				const __m256i d5 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d5 );
+				const __m256i d6 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d6 );
+				const __m256i d7 = _mm256_stream_load_si256( src++ );
+				_mm256_stream_si256( dst++, d7 );
+			}
 		}
 	}
-#else
-	static void StreamCopy( __m256i* dst, const __m256i* src, const uint bytes )
-	{
-		// https://stackoverflow.com/questions/2963898/faster-alternative-to-memcpy
-		assert( (bytes & 31) == 0 );
-	#if 0
-		// SSE 4.2
-		uint N = bytes / 16;
-		const __m128i* src4 = (__m128i*)src;
-		__m128i* dst4 = (__m128i*)dst;
-		for (; N > 0; N--, src4++, dst4++)
-		{
-			const __m128i d = _mm_stream_load_si128( src4 );
-			_mm_stream_si128( dst4, d );
-		}
-	#else
-		// AVX2
-		uint N = bytes / 32;
-		for (; N > 0; N--, src++, dst++)
-		{
-			const __m256i d = _mm256_stream_load_si256( src );
-			_mm256_stream_si256( dst, d );
-		}
-	#endif
-	}
-#endif
 	void StreamCopyMT( __m256i* dst, __m256i* src, const uint bytes );
 	// helper class for multithreaded memcpy
 	class CopyJob : public Job
@@ -410,7 +397,7 @@ private:
 	};
 	// data members
 	mat4 camMat;						// camera matrix to be used for rendering
-	uint* grid = 0, *gridOrig = 0;		// pointer to host-side copy of the top-level grid
+	uint* grid = 0, * gridOrig = 0;		// pointer to host-side copy of the top-level grid
 	Buffer* brickBuffer[4];				// OpenCL buffer for the bricks
 	PAYLOAD* brick = 0;					// pointer to host-side copy of the bricks
 	uint* modified = 0;					// bitfield to mark bricks for synchronization
@@ -429,7 +416,7 @@ private:
 	int2 skySize;						// size of the skydome bitmap
 	RenderParams params;				// CPU-side copy of the renderer parameters
 	Kernel* renderer, * committer;		// render kernel and commit kernel
-	Kernel* finalizer, *unsharpen;		// TAA finalization kernels
+	Kernel* finalizer, * unsharpen;		// TAA finalization kernels
 	Kernel* batchTracer;				// ray batch tracing kernel for inline tracing
 #if CELLSKIPPING == 1
 	Kernel* hermitFinder;				// find cells surrounded by empty neighbors

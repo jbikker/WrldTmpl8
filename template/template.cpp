@@ -35,6 +35,9 @@ static int scrwidth = 0, scrheight = 0;
 static World* world = 0;
 static Game* game = 0;
 
+// static member data for instruction set support class
+const InstructionSet::InstructionSet_Internal InstructionSet::CPU_Rep;
+
 // find the game implementation
 Game* CreateGame();
 
@@ -306,7 +309,7 @@ void main()
 	glfwWindowHint( GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE );
 	glfwWindowHint( GLFW_STENCIL_BITS, GL_FALSE );
 	glfwWindowHint( GLFW_RESIZABLE, GL_FALSE /* easier :) */ );
-	if (!(window = glfwCreateWindow( SCRWIDTH, SCRHEIGHT, "Template 2020", 0, 0 ))) FatalError( "glfwCreateWindow failed." );
+	if (!(window = glfwCreateWindow( SCRWIDTH, SCRHEIGHT, "Voxel World Tmpl8", 0, 0 ))) FatalError( "glfwCreateWindow failed." );
 	glfwMakeContextCurrent( window );
 	// register callbacks
 	glfwSetWindowSizeCallback( window, ReshapeWindowCallback );
@@ -322,6 +325,7 @@ void main()
 	glDisable( GL_DEPTH_TEST );
 	glDisable( GL_CULL_FACE );
 	glDisable( GL_BLEND );
+	CheckGL();
 	// we want a console window for text output
 #ifdef _MSC_VER
 	CONSOLE_SCREEN_BUFFER_INFO coninfo;
@@ -1127,7 +1131,7 @@ Buffer::Buffer( unsigned int N, unsigned int t, void* ptr )
 // ----------------------------------------------------------------------------
 Buffer::~Buffer()
 {
-	if (ownData) 
+	if (ownData)
 	{
 		delete hostBuffer;
 		hostBuffer = 0;
@@ -1335,6 +1339,7 @@ bool Kernel::InitCL()
 	if (!CHECKCL( error = clGetDeviceIDs( platform, CL_DEVICE_TYPE_ALL, devCount, devices, NULL ) )) return false;
 	unsigned int deviceUsed = -1;
 	unsigned int endDev = devCount - 1;
+	// search a capable OpenCL device
 	for (unsigned int i = 0; i <= endDev; ++i)
 	{
 		size_t extensionSize;
@@ -1343,32 +1348,35 @@ bool Kernel::InitCL()
 		{
 			char* extensions = (char*)malloc( extensionSize );
 			CHECKCL( error = clGetDeviceInfo( devices[i], CL_DEVICE_EXTENSIONS, extensionSize, extensions, &extensionSize ) );
-			string devices( extensions );
+			string deviceList( extensions );
 			free( extensions );
-			size_t o = 0, s = devices.find( ' ', o ); // extensions string is space delimited
-			while (s != devices.npos)
+			size_t o = 0, s = deviceList.find( ' ', o ); // extensions string is space delimited
+			while (s != deviceList.npos)
 			{
-				string subs = devices.substr( o, s - o );
+				string subs = deviceList.substr( o, s - o );
 				if (strcmp( "cl_khr_gl_sharing" /* device can do gl/cl interop */, subs.c_str() ) == 0)
 				{
-					deviceUsed = i;
-					break;
+					cl_context_properties props[] =
+					{
+						CL_GL_CONTEXT_KHR, (cl_context_properties)glfwGetWGLContext( window ),
+						CL_WGL_HDC_KHR, (cl_context_properties)wglGetCurrentDC(),
+						CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0
+					};
+					// attempt to create a context with the requested features
+					context = clCreateContext( props, 1, &devices[i], NULL, NULL, &error );
+					if (error == CL_SUCCESS)
+					{
+						candoInterop = true;
+						deviceUsed = i;
+						break;
+					}
 				}
-				do { o = s + 1, s = devices.find( ' ', o ); } while (s == o);
+				if (deviceUsed > -1) break;
+				do { o = s + 1, s = deviceList.find( ' ', o ); } while (s == o);
 			}
-			if (deviceUsed > -1) break;
 		}
 	}
-	cl_context_properties props[] =
-	{
-		CL_CONTEXT_PLATFORM, (cl_context_properties)platform,
-		CL_WGL_HDC_KHR, (cl_context_properties)wglGetCurrentDC(),
-		CL_GL_CONTEXT_KHR, (cl_context_properties)glfwGetWGLContext( window ), 0
-	};
-	// attempt to create a context with the requested features
-	candoInterop = true;
-	context = clCreateContext( props, 1, &devices[deviceUsed], NULL, NULL, &error );
-	if (error != 0) FatalError( "No capable OpenCL device found." );
+	if (deviceUsed == -1) FatalError( "No capable OpenCL device found." );
 	device = getFirstDevice( context );
 	if (!CHECKCL( error )) return false;
 	// print device name
@@ -1387,7 +1395,7 @@ bool Kernel::InitCL()
 	return true;
 }
 
-// InitCL method
+// KillCL method
 // ----------------------------------------------------------------------------
 void Kernel::KillCL()
 {
@@ -1777,7 +1785,7 @@ void* get_proc( const char* namez ) {
 	if (gladGetProcAddressPtr != NULL)
 	{
 		result = gladGetProcAddressPtr( namez );
-	}
+}
 #endif
 	if (result == NULL)
 	{
@@ -1798,7 +1806,7 @@ int gladLoadGL( void ) {
 	{
 		status = gladLoadGLLoader( &get_proc );
 		close_gl();
-	}
+}
 
 	return status;
 }
