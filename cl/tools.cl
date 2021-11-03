@@ -62,7 +62,7 @@ float3 PaniniProjection( float2 tc, const float fov, const float d )
 	return (float3)(sinPhi, tanTheta, cosPhi) * s;
 }
 
-const float halton[32] = { 
+__constant float halton[32] = { 
 	0, 0, 0.5f, 0.333333f, 0, 0.6666666f, 0.75f, 0.111111111f, 0, 0.44444444f, 
 	0.5f, 0.7777777f, 0.25f, 0.222222222f, 0.75f, 0.55555555f, 0, 0.88888888f, 
 	0.5f, 0.03703703f, 0.25f, 0.37037037f, 0.75f, 0.70370370f, 0.125f, 0.148148148f,
