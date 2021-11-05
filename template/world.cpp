@@ -1245,8 +1245,9 @@ void World::Render()
 		{
 			committer->SetArgument( 0, (int)tasks );
 			committer->Run( (tasks + 63) & (65536 - 32), 4, &copyDone, &commitDone );
+			commitInFlight = true;
 		}
-		copyInFlight = false, commitInFlight = true;
+		copyInFlight = false;
 	}
 	if (Game::autoRendering)
 	{
@@ -1286,18 +1287,6 @@ void World::Render()
 		params.prevP1 = make_float4( prevP1, 0 );
 		params.prevP2 = make_float4( prevP2, 0 );
 		params.prevP3 = make_float4( prevP3, 0 );
-		// test
-	#define dot3(a,b) (a.x*b.x+a.y*b.y+a.z*b.z)
-		float3 pixelPos = (params.p1 + params.p0) * 0.5f;
-		float3 D = normalize( pixelPos - params.E );
-		pixelPos = params.E + 10.0f * D;
-		const float dl = dot3( pixelPos, params.prevRight ) - dot3( prevP0, params.prevRight );
-		const float dr = dot3( pixelPos, -params.prevRight ) + dot3( prevP1, params.prevRight );
-		const float dt = dot3( pixelPos, params.prevDown ) - dot3( prevP0, params.prevDown );
-		const float db = dot3( pixelPos, -params.prevDown ) + dot3( prevP2, params.prevDown );
-		const float u_prev = SCRWIDTH * (dl / (dl + dr));
-		const float v_prev = SCRHEIGHT * (dt / (dt + db));
-		int w = 0;
 		// finalize params
 		params.R0 = RandomUInt();
 		params.skyWidth = skySize.x;
@@ -1306,35 +1295,6 @@ void World::Render()
 		params.frame = frame++ & 255;
 		for (int i = 0; i < 6; i++) params.skyLight[i] = skyLight[i];
 		params.skyLightScale = Game::skyDomeLightScale;
-		// TAA
-	#if 0 // now handled in the GPU code
-	#if TAA == 1
-		static float2* halton = 0;
-		static int jitterFrame = 0;
-		if (!halton)
-		{
-			// precalculate TAA jittering; Halton sequence
-			halton = new float2[16];
-			for (int i = 0; i < 16; i++)
-			{
-				float2 s = make_float2( (float)i, (float)i );
-				float4 a = make_float4( 1, 1, 0, 0 );
-				while (s.x > 0.f && s.y > 0.f)
-					a.x /= 2.0f, a.y /= 3.0f,
-					a.z += a.x * fmod( s.x, 2.0f ), a.w += a.y * fmod( s.y, 3.0f ),
-					s.x = floor( s.x / 2.0f ), s.y = floor( s.y / 3.0f );
-				halton[i] = make_float2( a.z, a.w );
-			}
-			int w = 0;
-		}
-		// apply jitter to params.p0
-		jitterFrame = (jitterFrame + 1) & 15;
-		float3 jitter =
-			halton[jitterFrame].x * (params.p1 - params.p0) * params.oneOverRes.x +
-			halton[jitterFrame].y * (params.p2 - params.p0) * params.oneOverRes.y;
-		params.p0 += jitter; params.p1 += jitter, params.p2 += jitter;
-	#endif
-	#endif
 		// get render parameters to GPU and invoke kernel asynchronously
 		paramBuffer->CopyToDevice( false );
 		if (!screen)
@@ -1385,7 +1345,11 @@ void World::Commit()
 	auto& particles = GetParticlesList();
 	for (int s = (int)particles.size(), i = 0; i < s; i++) DrawParticles( i );
 	// make sure the previous commit completed
-	if (commitInFlight) clWaitForEvents( 1, &commitDone );
+	if (commitInFlight) 
+	{
+		clWaitForEvents( 1, &commitDone );
+		commitInFlight = false;
+	}
 	// replace the initial commit buffer by a double-sized buffer in pinned memory
 	static uint* pinnedMemPtr = 0;
 	if (pinnedMemPtr == 0)

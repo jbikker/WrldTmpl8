@@ -36,7 +36,7 @@ static World* world = 0;
 static Game* game = 0;
 
 // static member data for instruction set support class
-const InstructionSet::InstructionSet_Internal InstructionSet::CPU_Rep;
+static const CPUCaps cpucaps;
 
 // find the game implementation
 Game* CreateGame();

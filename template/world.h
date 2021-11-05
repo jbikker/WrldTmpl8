@@ -274,7 +274,6 @@ public:
 			// we keep track of the number of zeroes, so we can remove fully zeroed bricks
 			brickInfo[newIdx].zeroes = g == 0 ? BRICKSIZE : 0;
 			g1 = newIdx, grid[cellIdx] = g = (newIdx << 1) | 1;
-			// brickInfo[newIdx].location = cellIdx; // not used yet
 		}
 		// calculate the position of the voxel inside the brick
 		const uint lx = x & (BRICKDIM - 1), ly = y & (BRICKDIM - 1), lz = z & (BRICKDIM - 1);
@@ -340,7 +339,7 @@ private:
 	{
 		// https://stackoverflow.com/questions/2963898/faster-alternative-to-memcpy
 		assert( (bytes & 31) == 0 );
-		if (!InstructionSet::AVX2)
+		if (!CPUCaps::HW_AVX2)
 		{
 			// fallback: no AVX2, use SSE 4.2
 			uint N = bytes / 16;

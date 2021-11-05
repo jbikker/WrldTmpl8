@@ -3,16 +3,11 @@
 
 Game* CreateGame() { return new MyGame(); }
 
-uint ship, corvette, frame = 0;
-
 // -----------------------------------------------------------
 // Initialize the application
 // -----------------------------------------------------------
 void MyGame::Init()
 {
-	// change the skydome - defaults can be found in precomp.h, class Game
-	skyDomeImage = "assets/sky_17.hdr";
-	skyDomeScale = 0.7f;
 	// clear world geometry
 	ClearWorld();
 }

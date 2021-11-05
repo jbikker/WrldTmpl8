@@ -1133,141 +1133,103 @@ struct Intersection
 #include <array>
 #include <intrin.h>
 
-// instruction set detection, from:
-// https://docs.microsoft.com/en-us/cpp/intrinsics/cpuid-cpuidex?view=msvc-160
-class InstructionSet
+// instruction set detection
+#ifdef _WIN32
+#define cpuid(info, x) __cpuidex(info, x, 0)
+#else
+#include <cpuid.h>
+void cpuid( int info[4], int InfoType ) { __cpuid_count( InfoType, 0, info[0], info[1], info[2], info[3] ); }
+#endif
+class CPUCaps // from https://github.com/Mysticial/FeatureDetector
 {
-	// forward declarations
-	class InstructionSet_Internal;
 public:
-	// getters
-	static string Vendor( void ) { return CPU_Rep.vendor_; }
-	static string Brand( void ) { return CPU_Rep.brand_; }
-	static bool SSE3( void ) { return CPU_Rep.f_1_ECX_[0]; }
-	static bool PCLMULQDQ( void ) { return CPU_Rep.f_1_ECX_[1]; }
-	static bool MONITOR( void ) { return CPU_Rep.f_1_ECX_[3]; }
-	static bool SSSE3( void ) { return CPU_Rep.f_1_ECX_[9]; }
-	static bool FMA( void ) { return CPU_Rep.f_1_ECX_[12]; }
-	static bool CMPXCHG16B( void ) { return CPU_Rep.f_1_ECX_[13]; }
-	static bool SSE41( void ) { return CPU_Rep.f_1_ECX_[19]; }
-	static bool SSE42( void ) { return CPU_Rep.f_1_ECX_[20]; }
-	static bool MOVBE( void ) { return CPU_Rep.f_1_ECX_[22]; }
-	static bool POPCNT( void ) { return CPU_Rep.f_1_ECX_[23]; }
-	static bool AES( void ) { return CPU_Rep.f_1_ECX_[25]; }
-	static bool XSAVE( void ) { return CPU_Rep.f_1_ECX_[26]; }
-	static bool OSXSAVE( void ) { return CPU_Rep.f_1_ECX_[27]; }
-	static bool AVX( void ) { return CPU_Rep.f_1_ECX_[28]; }
-	static bool F16C( void ) { return CPU_Rep.f_1_ECX_[29]; }
-	static bool RDRAND( void ) { return CPU_Rep.f_1_ECX_[30]; }
-	static bool MSR( void ) { return CPU_Rep.f_1_EDX_[5]; }
-	static bool CX8( void ) { return CPU_Rep.f_1_EDX_[8]; }
-	static bool SEP( void ) { return CPU_Rep.f_1_EDX_[11]; }
-	static bool CMOV( void ) { return CPU_Rep.f_1_EDX_[15]; }
-	static bool CLFSH( void ) { return CPU_Rep.f_1_EDX_[19]; }
-	static bool MMX( void ) { return CPU_Rep.f_1_EDX_[23]; }
-	static bool FXSR( void ) { return CPU_Rep.f_1_EDX_[24]; }
-	static bool SSE( void ) { return CPU_Rep.f_1_EDX_[25]; }
-	static bool SSE2( void ) { return CPU_Rep.f_1_EDX_[26]; }
-	static bool FSGSBASE( void ) { return CPU_Rep.f_7_EBX_[0]; }
-	static bool BMI1( void ) { return CPU_Rep.f_7_EBX_[3]; }
-	static bool HLE( void ) { return CPU_Rep.isIntel_ && CPU_Rep.f_7_EBX_[4]; }
-	static bool AVX2( void ) { return CPU_Rep.f_7_EBX_[5]; }
-	static bool BMI2( void ) { return CPU_Rep.f_7_EBX_[8]; }
-	static bool ERMS( void ) { return CPU_Rep.f_7_EBX_[9]; }
-	static bool INVPCID( void ) { return CPU_Rep.f_7_EBX_[10]; }
-	static bool RTM( void ) { return CPU_Rep.isIntel_ && CPU_Rep.f_7_EBX_[11]; }
-	static bool AVX512F( void ) { return CPU_Rep.f_7_EBX_[16]; }
-	static bool RDSEED( void ) { return CPU_Rep.f_7_EBX_[18]; }
-	static bool ADX( void ) { return CPU_Rep.f_7_EBX_[19]; }
-	static bool AVX512PF( void ) { return CPU_Rep.f_7_EBX_[26]; }
-	static bool AVX512ER( void ) { return CPU_Rep.f_7_EBX_[27]; }
-	static bool AVX512CD( void ) { return CPU_Rep.f_7_EBX_[28]; }
-	static bool SHA( void ) { return CPU_Rep.f_7_EBX_[29]; }
-	static bool PREFETCHWT1( void ) { return CPU_Rep.f_7_ECX_[0]; }
-	static bool LAHF( void ) { return CPU_Rep.f_81_ECX_[0]; }
-	static bool LZCNT( void ) { return CPU_Rep.isIntel_ && CPU_Rep.f_81_ECX_[5]; }
-	static bool ABM( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_ECX_[5]; }
-	static bool SSE4a( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_ECX_[6]; }
-	static bool XOP( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_ECX_[11]; }
-	static bool TBM( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_ECX_[21]; }
-	static bool SYSCALL( void ) { return CPU_Rep.isIntel_ && CPU_Rep.f_81_EDX_[11]; }
-	static bool MMXEXT( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_EDX_[22]; }
-	static bool RDTSCP( void ) { return CPU_Rep.isIntel_ && CPU_Rep.f_81_EDX_[27]; }
-	static bool _3DNOWEXT( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_EDX_[30]; }
-	static bool _3DNOW( void ) { return CPU_Rep.isAMD_ && CPU_Rep.f_81_EDX_[31]; }
-private:
-	static const InstructionSet_Internal CPU_Rep;
-	class InstructionSet_Internal
+	static inline bool HW_MMX = false;
+	static inline bool HW_x64 = false;
+	static inline bool HW_ABM = false;
+	static inline bool HW_RDRAND = false;
+	static inline bool HW_BMI1 = false;
+	static inline bool HW_BMI2 = false;
+	static inline bool HW_ADX = false;
+	static inline bool HW_PREFETCHWT1 = false;
+	// SIMD: 128-bit
+	static inline bool HW_SSE = false;
+	static inline bool HW_SSE2 = false;
+	static inline bool HW_SSE3 = false;
+	static inline bool HW_SSSE3 = false;
+	static inline bool HW_SSE41 = false;
+	static inline bool HW_SSE42 = false;
+	static inline bool HW_SSE4a = false;
+	static inline bool HW_AES = false;
+	static inline bool HW_SHA = false;
+	// SIMD: 256-bit
+	static inline bool HW_AVX = false;
+	static inline bool HW_XOP = false;
+	static inline bool HW_FMA3 = false;
+	static inline bool HW_FMA4 = false;
+	static inline bool HW_AVX2 = false;
+	// SIMD: 512-bit
+	static inline bool HW_AVX512F = false;    //  AVX512 Foundation
+	static inline bool HW_AVX512CD = false;   //  AVX512 Conflict Detection
+	static inline bool HW_AVX512PF = false;   //  AVX512 Prefetch
+	static inline bool HW_AVX512ER = false;   //  AVX512 Exponential + Reciprocal
+	static inline bool HW_AVX512VL = false;   //  AVX512 Vector Length Extensions
+	static inline bool HW_AVX512BW = false;   //  AVX512 Byte + Word
+	static inline bool HW_AVX512DQ = false;   //  AVX512 Doubleword + Quadword
+	static inline bool HW_AVX512IFMA = false; //  AVX512 Integer 52-bit Fused Multiply-Add
+	static inline bool HW_AVX512VBMI = false; //  AVX512 Vector Byte Manipulation Instructions
+	// constructor
+	CPUCaps()
 	{
-	public:
-		InstructionSet_Internal() :
-			nIds_{ 0 }, nExIds_{ 0 }, isIntel_{ false }, isAMD_{ false }, f_1_ECX_{ 0 }, f_1_EDX_{ 0 },
-			f_7_EBX_{ 0 }, f_7_ECX_{ 0 }, f_81_ECX_{ 0 }, f_81_EDX_{ 0 }, data_{}, extdata_{}
+		int info[4];
+		cpuid( info, 0 );
+		int nIds = info[0];
+		cpuid( info, 0x80000000 );
+		unsigned nExIds = info[0];
+		// detect Features
+		if (nIds >= 0x00000001)
 		{
-			//int cpuInfo[4] = {-1};
-			array<int, 4> cpui;
-			// calling __cpuid with 0x0 as the function_id argument
-			// gets the number of the highest valid function ID.
-			__cpuid( cpui.data(), 0 );
-			nIds_ = cpui[0];
-			for (int i = 0; i <= nIds_; ++i)
-			{
-				__cpuidex( cpui.data(), i, 0 );
-				data_.push_back( cpui );
-			}
-			// Capture vendor string
-			char vendor[0x20];
-			memset( vendor, 0, sizeof( vendor ) );
-			*reinterpret_cast<int*>(vendor) = data_[0][1];
-			*reinterpret_cast<int*>(vendor + 4) = data_[0][3];
-			*reinterpret_cast<int*>(vendor + 8) = data_[0][2];
-			vendor_ = vendor;
-			if (vendor_ == "GenuineIntel") isIntel_ = true;
-			else if (vendor_ == "AuthenticAMD")isAMD_ = true;
-			// load bitset with flags for function 0x00000001
-			if (nIds_ >= 1)
-				f_1_ECX_ = data_[1][2],
-				f_1_EDX_ = data_[1][3];
-			// load bitset with flags for function 0x00000007
-			if (nIds_ >= 7)
-				f_7_EBX_ = data_[7][1],
-				f_7_ECX_ = data_[7][2];
-			// calling __cpuid with 0x80000000 as the function_id argument
-			// gets the number of the highest valid extended ID.
-			__cpuid( cpui.data(), 0x80000000 );
-			nExIds_ = cpui[0];
-			char brand[0x40];
-			memset( brand, 0, sizeof( brand ) );
-			for (int i = 0x80000000; i <= nExIds_; ++i)
-			{
-				__cpuidex( cpui.data(), i, 0 );
-				extdata_.push_back( cpui );
-			}
-			// load bitset with flags for function 0x80000001
-			if (nExIds_ >= 0x80000001)
-				f_81_ECX_ = extdata_[1][2],
-				f_81_EDX_ = extdata_[1][3];
-			// interpret CPU brand string if reported
-			if (nExIds_ >= 0x80000004)
-			{
-				memcpy( brand, extdata_[2].data(), sizeof( cpui ) );
-				memcpy( brand + 16, extdata_[3].data(), sizeof( cpui ) );
-				memcpy( brand + 32, extdata_[4].data(), sizeof( cpui ) );
-				brand_ = brand;
-			}
-		};
-		int nIds_, nExIds_;
-		string vendor_, brand_;
-		bool isIntel_, isAMD_;
-		bitset<32> f_1_ECX_;
-		bitset<32> f_1_EDX_;
-		bitset<32> f_7_EBX_;
-		bitset<32> f_7_ECX_;
-		bitset<32> f_81_ECX_;
-		bitset<32> f_81_EDX_;
-		vector<array<int, 4>> data_;
-		vector<array<int, 4>> extdata_;
-	};
+			cpuid( info, 0x00000001 );
+			HW_MMX = (info[3] & ((int)1 << 23)) != 0;
+			HW_SSE = (info[3] & ((int)1 << 25)) != 0;
+			HW_SSE2 = (info[3] & ((int)1 << 26)) != 0;
+			HW_SSE3 = (info[2] & ((int)1 << 0)) != 0;
+			HW_SSSE3 = (info[2] & ((int)1 << 9)) != 0;
+			HW_SSE41 = (info[2] & ((int)1 << 19)) != 0;
+			HW_SSE42 = (info[2] & ((int)1 << 20)) != 0;
+			HW_AES = (info[2] & ((int)1 << 25)) != 0;
+			HW_AVX = (info[2] & ((int)1 << 28)) != 0;
+			HW_FMA3 = (info[2] & ((int)1 << 12)) != 0;
+			HW_RDRAND = (info[2] & ((int)1 << 30)) != 0;
+		}
+		if (nIds >= 0x00000007)
+		{
+			cpuid( info, 0x00000007 );
+			HW_AVX2 = (info[1] & ((int)1 << 5)) != 0;
+			HW_BMI1 = (info[1] & ((int)1 << 3)) != 0;
+			HW_BMI2 = (info[1] & ((int)1 << 8)) != 0;
+			HW_ADX = (info[1] & ((int)1 << 19)) != 0;
+			HW_SHA = (info[1] & ((int)1 << 29)) != 0;
+			HW_PREFETCHWT1 = (info[2] & ((int)1 << 0)) != 0;
+			HW_AVX512F = (info[1] & ((int)1 << 16)) != 0;
+			HW_AVX512CD = (info[1] & ((int)1 << 28)) != 0;
+			HW_AVX512PF = (info[1] & ((int)1 << 26)) != 0;
+			HW_AVX512ER = (info[1] & ((int)1 << 27)) != 0;
+			HW_AVX512VL = (info[1] & ((int)1 << 31)) != 0;
+			HW_AVX512BW = (info[1] & ((int)1 << 30)) != 0;
+			HW_AVX512DQ = (info[1] & ((int)1 << 17)) != 0;
+			HW_AVX512IFMA = (info[1] & ((int)1 << 21)) != 0;
+			HW_AVX512VBMI = (info[2] & ((int)1 << 1)) != 0;
+		}
+		if (nExIds >= 0x80000001)
+		{
+			cpuid( info, 0x80000001 );
+			HW_x64 = (info[3] & ((int)1 << 29)) != 0;
+			HW_ABM = (info[2] & ((int)1 << 5)) != 0;
+			HW_SSE4a = (info[2] & ((int)1 << 6)) != 0;
+			HW_FMA4 = (info[2] & ((int)1 << 16)) != 0;
+			HW_XOP = (info[2] & ((int)1 << 11)) != 0;
+		}
+	}
 };
 
 // voxel world engine
