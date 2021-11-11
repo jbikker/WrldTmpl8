@@ -1785,7 +1785,7 @@ void* get_proc( const char* namez ) {
 	if (gladGetProcAddressPtr != NULL)
 	{
 		result = gladGetProcAddressPtr( namez );
-}
+	}
 #endif
 	if (result == NULL)
 	{
@@ -1806,7 +1806,7 @@ int gladLoadGL( void ) {
 	{
 		status = gladLoadGLLoader( &get_proc );
 		close_gl();
-}
+	}
 
 	return status;
 }
