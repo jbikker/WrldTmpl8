@@ -249,6 +249,17 @@ float Trace( const float3 P1, const float3 P2 )
 	world->TraceRay( make_float4( P1 + 0.001f * D, 1 ), make_float4( D, 1 ), dist, dummy, 999999 );
 	return dist;
 }
+Intersection Trace( const Ray& r )
+{
+	float3 N;
+	float dist;
+	Intersection i;
+	const uint voxel = world->TraceRay( make_float4( r.O, 1 ), make_float4( r.D, 1 ), dist, N, 999999 );
+	i.t = dist < r.t ? dist : 1e34f;
+	const uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
+	i.N = (voxel == 0 ? 0 : Nval) + (voxel << 16);
+	return i;
+}
 Ray* GetBatchBuffer()
 {
 	if (Game::autoRendering) FatalError( "disable autoRendering for inline ray batch processing." );

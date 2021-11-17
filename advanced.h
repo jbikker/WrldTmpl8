@@ -8,6 +8,8 @@ class Advanced : public Game
 public:
 	// game flow methods
 	void Init();
+	void CPURays();
+	void GPURays();
 	void Tick( float deltaTime );
 	void Shutdown() { /* implement if you want to do something on exit */ }
 	// input handling
