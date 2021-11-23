@@ -14,6 +14,8 @@ void Advanced::Init()
 	for( int x = 0; x < 10; x++ ) for( int z = 0; z < 10; z++ ) for( int y = 0; y < 2; y++ )
 		Sphere( x * 96.0f + 32, y * 96.0f + 48, z * 96.0f + 32, 28.0f, colors[RandomUInt() % 7] );
     LookAt( make_float3( 280, 100, 50 ), make_float3( 380, 128, 512 ) );
+	// add a plane to debug the CPU traversal code
+	for( int x = 100; x < 900; x++ ) for( int z = 100; z < 900; z++ ) Plot( x, 50, z, GREEN );
 	// disable automatic rendering: we will spawn our own rays
 	autoRendering = false;
 }
@@ -49,7 +51,8 @@ void Advanced::CPURays()
 		{
 			float t = intersection.GetDistance(); // TODO: use
 			float3 N = intersection.GetNormal(); // TODO: use
-			screen->Plot( x, y, RGB16to32( intersection.GetVoxel() ) );
+			screen->Plot( x, y, ((int)((N.x + 1) * 127) << 16) + ((int)((N.y + 1) * 127) << 8) + (int)((N.z + 1) * 127) );
+			// screen->Plot( x, y, RGB16to32( intersection.GetVoxel() ) );
 		}
 	}
 	// TODO: Whitted
@@ -84,7 +87,8 @@ void Advanced::GPURays()
 		{
 			float t = result[i].GetDistance(); // TODO: use
 			float3 N = result[i].GetNormal(); // TODO: use
-			screen->Plot( x, y, RGB16to32( result[i].GetVoxel() ) );
+			screen->Plot( x, y, ((int)((N.x + 1) * 127) << 16) + ((int)((N.y + 1) * 127) << 8) + (int)((N.z + 1) * 127) );
+			// screen->Plot( x, y, RGB16to32( result[i].GetVoxel() ) );
 		}
 	}
 	// TODO: Whitted

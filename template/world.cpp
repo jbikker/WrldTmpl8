@@ -119,7 +119,7 @@ World::World( const uint targetID )
 	for (int i = 0; i < (128 * 128 * 8); i++) data32[i + 3 * 65536] = data8[i];
 	blueNoise = new Buffer( 65536 * 5, Buffer::READONLY, data32 );
 	blueNoise->CopyToDevice();
-	delete [] data32;
+	delete[] data32;
 	// load a bitmap font for the print command
 	font = new Surface( "assets/font.png" );
 }
@@ -1095,7 +1095,7 @@ void World::DrawBigTiles( const char* tileString, const uint x, const uint y, co
 	}
 }
 
-// World::Trace
+// World::TraceRay
 // ----------------------------------------------------------------------------
 float4 FixZeroDeltas( float4 V )
 {
@@ -1108,6 +1108,7 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 {
 	const float4 V = FixZeroDeltas( B ), rV = make_float4( 1 / V.x, 1 / V.y, 1 / V.z, 1 );
 	const bool originOutsideGrid = A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH;
+	float to = 0; // distance to travel to get into grid
 	if (steps == 999999 && originOutsideGrid)
 	{
 		// use slab test to clip ray origin against scene AABB
@@ -1118,55 +1119,59 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 		const float tz1 = -A.z * rV.z, tz2 = (MAPDEPTH - A.z) * rV.z;
 		tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
 		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
+		to = tmin;
 	}
-	uint4 pos = make_uint4( clamp( (int)A.x, 0, MAPWIDTH - 1 ), clamp( (int)A.y, 0, MAPHEIGHT - 1 ), clamp( (int)A.z, 0, MAPDEPTH - 1 ), 0 );
+	uint tp = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
+		clamp( (uint)A.z >> 3, 0u, 127u );
 	const int bits = SELECT( 4, 34, V.x > 0 ) + SELECT( 3072, 10752, V.y > 0 ) + SELECT( 1310720, 3276800, V.z > 0 ); // magic
-	float tmx = ((float)((pos.x & BPMX) + ((bits >> (5 - BDIMLOG2)) & (1 << BDIMLOG2))) - A.x) * rV.x;
-	float tmy = ((float)((pos.y & BPMY) + ((bits >> (13 - BDIMLOG2)) & (1 << BDIMLOG2))) - A.y) * rV.y;
-	float tmz = ((float)((pos.z & BPMZ) + ((bits >> (21 - BDIMLOG2)) & (1 << BDIMLOG2))) - A.z) * rV.z, t = 0;
-	const float tdx = (float)DIR_X * rV.x, tdy = (float)DIR_Y * rV.y, tdz = (float)DIR_Z * rV.z;
+	float4 tm = (make_float4( (float)(((tp >> 20) & 127) + ((bits >> 5) & 1)), (float)(((tp >> 10) & 127) + ((bits >> 13) & 1)),
+		(float)((tp & 127) + ((bits >> 21) & 1)), 0 ) - A * 0.125f) * rV;
+	float t = 0;
+	const float4 td = make_float4( (float)DIR_X, (float)DIR_Y, (float)DIR_Z, 0 ) * rV;
 	uint last = 0;
-	while (true)
+	do
 	{
-		// check main grid
-		const uint o = grid[pos.x / BRICKDIM + (pos.z / BRICKDIM) * GRIDWIDTH + (pos.y / BRICKDIM) * GRIDWIDTH * GRIDDEPTH];
+		// fetch brick from top grid
+		uint o = grid[(tp >> 20) + ((tp & 127) << 7) + (((tp >> 10) & 127) << 14)];
+		if (!--steps) break;
 		if (o != 0) if ((o & 1) == 0) /* solid */
 		{
-			dist = t, N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+			dist = (t + to) * 8.0f;
+			N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
 			return o >> 1;
 		}
 		else // brick
 		{
-			const float4 I = A + V * t;
-			uint p = (clamp( (uint)I.x, pos.x & BPMX, (pos.x & BPMX) + BMSK ) << 20) +
-				(clamp( (uint)I.y, pos.y & BPMY, (pos.y & BPMY) + BMSK ) << 10) +
-				clamp( (uint)I.z, pos.z & BPMZ, (pos.z & BPMZ) + BMSK );
-			const uint pn = p & TOPMASK3;
-			float dmx = ((float)((p >> 20) + OFFS_X) - A.x) * rV.x;
-			float dmy = ((float)(((p >> 10) & 1023) + OFFS_Y) - A.y) * rV.y;
-			float dmz = ((float)((p & 1023) + OFFS_Z) - A.z) * rV.z, d = t;
-			do
+			// backup top-grid traversal state
+			const float4 tm_ = tm;
+			// intialize brick traversal
+			tm = A + V * (t *= 8); // abusing tm for I to save registers
+			uint p = (clamp( (uint)tm.x, tp >> 17, (tp >> 17) + 7 ) << 20) +
+				(clamp( (uint)tm.y, (tp >> 7) & 1023, ((tp >> 7) & 1023) + 7 ) << 10) +
+				clamp( (uint)tm.z, (tp << 3) & 1023, ((tp << 3) & 1023) + 7 ), lp = ~1;
+			tm = (make_float4( (float)((p >> 20) + OFFS_X), (float)(((p >> 10) & 1023) + OFFS_Y), (float)((p & 1023) + OFFS_Z), 0 ) - A) * rV;
+			p &= 7 + (7 << 10) + (7 << 20), o = (o >> 1) * BRICKSIZE;
+			do // traverse brick
 			{
-				const uint idx = (o >> 1) * BRICKSIZE + ((p >> 20) & BMSK) + ((p >> 10) & BMSK) * BRICKDIM + (p & BMSK) * BDIM2;
-				const unsigned int color = brick[idx];
-				if (color != 0U)
+				const uint v = brick[o + (p >> 20) + ((p >> 7) & (BMSK * BRICKDIM)) + (p & BMSK) * BDIM2];
+				if (v)
 				{
-					dist = d, N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
-					return color;
+					dist = t + to;
+					N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+					return v;
 				}
-				d = min( dmx, min( dmy, dmz ) );
-				if (d == dmx) dmx += tdx, p += DIR_X << 20, last = 0;
-				if (d == dmy) dmy += tdy, p += DIR_Y << 10, last = 1;
-				if (d == dmz) dmz += tdz, p += DIR_Z, last = 2;
-			} while ((p & TOPMASK3) == pn);
+				t = min( tm.x, min( tm.y, tm.z ) );
+				if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
+				else if (t == tm.y) tm.y += td.y, p += ((bits << 2) & 3072) - 1024, last = 1;
+				else if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
+			} while (!(p & TOPMASK3));
+			tm = tm_; // restore top-grid traversal state
 		}
-		if (!--steps) break;
-		t = min( tmx, min( tmy, tmz ) );
-		if (t == tmx) tmx += tdx * BRICKDIM, pos.x += DIR_X * BRICKDIM, last = 0;
-		if (t == tmy) tmy += tdy * BRICKDIM, pos.y += DIR_Y * BRICKDIM, last = 1;
-		if (t == tmz) tmz += tdz * BRICKDIM, pos.z += DIR_Z * BRICKDIM, last = 2;
-		if ((pos.x & (65536 - MAPWIDTH)) + (pos.y & (65536 - MAPWIDTH)) + (pos.z & (65536 - MAPWIDTH))) break;
-	}
+		t = min( tm.x, min( tm.y, tm.z ) );
+		if (t == tm.x) tm.x += td.x, tp += DIR_X << 20, last = 0;
+		else if (t == tm.y) tm.y += td.y, tp += DIR_Y << 10, last = 1;
+		else if (t == tm.z) tm.z += td.z, tp += DIR_Z, last = 2;
+	} while (!(tp & 0xf80e0380));
 	return 0U;
 }
 
@@ -1345,7 +1350,7 @@ void World::Commit()
 	auto& particles = GetParticlesList();
 	for (int s = (int)particles.size(), i = 0; i < s; i++) DrawParticles( i );
 	// make sure the previous commit completed
-	if (commitInFlight) 
+	if (commitInFlight)
 	{
 		clWaitForEvents( 1, &commitDone );
 		commitInFlight = false;
