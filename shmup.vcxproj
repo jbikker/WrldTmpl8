@@ -64,7 +64,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
     <Link>
-      <AdditionalLibraryDirectories>lib\irrKlang\lib;lib/glfw/lib-vc2017;lib/zlib;lib/OpenCL/lib/x64</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>lib\irrKlang\lib;lib/glfw/lib-vc2017;lib/zlib;$(CUDA_PATH)/lib/x64;lib/OpenCL/lib/x64</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
