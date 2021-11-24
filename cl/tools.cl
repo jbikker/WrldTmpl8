@@ -144,7 +144,7 @@ float3 ToneMapFilmic_Hejl2015(const float3 hdr, float whitePt)
     float4 vh = (float4)(hdr, whitePt);
     float4 va = 1.425f * vh + 0.05f;
     float4 vf = (vh * va + 0.004f) / (vh * (va + 0.55f) + 0.0491f) - 0.0821f;
-    return vf.rgb / vf.www;
+    return vf.xyz / vf.www;
 }
 
 // Linear to SRGB, also via https://www.shadertoy.com/view/3sfBWs

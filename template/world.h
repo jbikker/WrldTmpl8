@@ -166,6 +166,7 @@ public:
 	~World();
 	// initialization
 	void Clear();
+	void Fill( const uint c );
 	void DummyWorld();
 	void LoadSky( const char* filename, const float scale = 1.0f );
 	float3 SampleSky( const float3& D );
@@ -199,8 +200,10 @@ public:
 	void DrawBigTiles( const char* tileString, const uint x, const uint y, const uint z );
 	// inline ray tracing / cpu-only ray tracing / inline ray batch rendering
 	uint TraceRay( float4 A, const float4 B, float& dist, float3& N, int steps );
+	void TraceRayToVoid( float4 A, const float4 B, float& dist, float3& N );
 	Ray* GetBatchBuffer();
 	Intersection* TraceBatch( const uint batchSize );
+	Intersection* TraceBatchToVoid( const uint batchSize );
 	// block scrolling
 	void ScrollX( const int offset );
 	void ScrollY( const int offset );
@@ -417,6 +420,7 @@ private:
 	Kernel* renderer, * committer;		// render kernel and commit kernel
 	Kernel* finalizer, * unsharpen;		// TAA finalization kernels
 	Kernel* batchTracer;				// ray batch tracing kernel for inline tracing
+	Kernel* batchToVoidTracer;			// ray batch tracing kernel for inline tracing from solid to void
 #if CELLSKIPPING == 1
 	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
 	cl_event hermitDone;				// for profiling

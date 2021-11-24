@@ -94,6 +94,7 @@ World::World( const uint targetID )
 	unsharpen = new Kernel( renderer->GetProgram(), "unsharpen" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
 	batchTracer = new Kernel( renderer->GetProgram(), "traceBatch" );
+	batchToVoidTracer = new Kernel( renderer->GetProgram(), "traceBatchToVoid" );
 #if CELLSKIPPING == 1
 	hermitFinder = new Kernel( renderer->GetProgram(), "findHermits" );
 	hermitFinder->SetArgument( 0, &devmem );
@@ -109,6 +110,11 @@ World::World( const uint targetID )
 	batchTracer->SetArgument( 2, brickBuffer[1] );
 	batchTracer->SetArgument( 3, brickBuffer[2] );
 	batchTracer->SetArgument( 4, brickBuffer[3] );
+	batchToVoidTracer->SetArgument( 0, &gridMap );
+	batchToVoidTracer->SetArgument( 1, brickBuffer[0] );
+	batchToVoidTracer->SetArgument( 2, brickBuffer[1] );
+	batchToVoidTracer->SetArgument( 3, brickBuffer[2] );
+	batchToVoidTracer->SetArgument( 4, brickBuffer[3] );
 	// prepare the bluenoise data
 	const uchar* data8 = (const uchar*)sob256_64; // tables are 8 bit per entry
 	uint* data32 = new uint[65536 * 5]; // we want a full uint per entry
@@ -180,6 +186,19 @@ void World::Clear()
 {
 	// easiest top just clear the top-level grid and recycle all bricks
 	memset( grid, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * sizeof( uint ) );
+	memset( trash, 0, BRICKCOUNT * 4 );
+	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
+	trashHead = BRICKCOUNT, trashTail = 0;
+	ClearMarks();
+}
+
+// World::Fill
+// ----------------------------------------------------------------------------
+void World::Fill( const uint c )
+{
+	// fill the top-level grid and recycle all bricks
+	for( int y = 0; y < GRIDHEIGHT; y++ ) for( int z = 0; z < GRIDDEPTH; z++ ) for( int x = 0; x < GRIDWIDTH; x++ )
+		grid[x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH] = c << 1;
 	memset( trash, 0, BRICKCOUNT * 4 );
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
 	trashHead = BRICKCOUNT, trashTail = 0;
@@ -1174,6 +1193,65 @@ uint World::TraceRay( float4 A, const float4 B, float& dist, float3& N, int step
 	} while (!(tp & 0xf80e0380));
 	return 0U;
 }
+void World::TraceRayToVoid( float4 A, const float4 B, float& dist, float3& N )
+{
+	// find the first empty voxel
+	const float4 V = FixZeroDeltas( B ), rV = make_float4( 1 / V.x, 1 / V.y, 1 / V.z, 1 );
+	if (A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH)
+	{
+		dist = 0; // we start outside the grid, and thus in empty space: don't do that
+		return;
+	}
+	uint tp = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
+		clamp( (uint)A.z >> 3, 0u, 127u );
+	const int bits = SELECT( 4, 34, V.x > 0 ) + SELECT( 3072, 10752, V.y > 0 ) + SELECT( 1310720, 3276800, V.z > 0 ); // magic
+	float4 tm = (make_float4( (float)(((tp >> 20) & 127) + ((bits >> 5) & 1)), (float)(((tp >> 10) & 127) + ((bits >> 13) & 1)),
+		(float)((tp & 127) + ((bits >> 21) & 1)), 0 ) - A * 0.125f) * rV;
+	float t = 0;
+	const float4 td = make_float4( (float)DIR_X, (float)DIR_Y, (float)DIR_Z, 0 ) * rV;
+	uint last = 0;
+	do
+	{
+		// fetch brick from top grid
+		uint o = grid[(tp >> 20) + ((tp & 127) << 7) + (((tp >> 10) & 127) << 14)];
+		if (o == 0) /* empty brick: done */
+		{
+			dist = t * 8.0f;
+			N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+			return;
+		}
+		else if ((o & 1) == 1) /* non-empty brick */
+		{
+			// backup top-grid traversal state
+			const float4 tm_ = tm;
+			// intialize brick traversal
+			tm = A + V * (t *= 8); // abusing tm for I to save registers
+			uint p = (clamp( (uint)tm.x, tp >> 17, (tp >> 17) + 7 ) << 20) +
+				(clamp( (uint)tm.y, (tp >> 7) & 1023, ((tp >> 7) & 1023) + 7 ) << 10) +
+				clamp( (uint)tm.z, (tp << 3) & 1023, ((tp << 3) & 1023) + 7 ), lp = ~1;
+			tm = (make_float4( (float)((p >> 20) + OFFS_X), (float)(((p >> 10) & 1023) + OFFS_Y), (float)((p & 1023) + OFFS_Z), 0 ) - A) * rV;
+			p &= 7 + (7 << 10) + (7 << 20), o = (o >> 1) * BRICKSIZE;
+			do // traverse brick
+			{
+				if (!brick[o + (p >> 20) + ((p >> 7) & (BMSK * BRICKDIM)) + (p & BMSK) * BDIM2])
+				{
+					dist = t;
+					N = make_float3( (float)((last == 0) * DIR_X), (float)((last == 1) * DIR_Y), (float)((last == 2) * DIR_Z) ) * -1.0f;
+					return;
+				}
+				t = min( tm.x, min( tm.y, tm.z ) );
+				if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
+				else if (t == tm.y) tm.y += td.y, p += ((bits << 2) & 3072) - 1024, last = 1;
+				else if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
+			} while (!(p & TOPMASK3));
+			tm = tm_; // restore top-grid traversal state
+		}
+		t = min( tm.x, min( tm.y, tm.z ) );
+		if (t == tm.x) tm.x += td.x, tp += DIR_X << 20, last = 0;
+		else if (t == tm.y) tm.y += td.y, tp += DIR_Y << 10, last = 1;
+		else if (t == tm.z) tm.z += td.z, tp += DIR_Z, last = 2;
+	} while (!(tp & 0xf80e0380));
+}
 
 static Buffer* rayBatchBuffer = 0;
 static Buffer* rayBatchResult = 0;
@@ -1189,6 +1267,8 @@ Ray* World::GetBatchBuffer()
 		// now that we have the buffers, we can pass them to the kernel (just once)
 		batchTracer->SetArgument( 6, rayBatchBuffer );
 		batchTracer->SetArgument( 7, rayBatchResult );
+		batchToVoidTracer->SetArgument( 6, rayBatchBuffer );
+		batchToVoidTracer->SetArgument( 7, rayBatchResult );
 	}
 	return (Ray*)rayBatchBuffer->hostBuffer;
 }
@@ -1205,6 +1285,25 @@ Intersection* World::TraceBatch( const uint batchSize )
 		// invoke ray tracing kernel
 		batchTracer->SetArgument( 5, (int)batchSize );
 		batchTracer->Run( batchSize );
+		// get results back from GPU
+		rayBatchResult->CopyFromDevice( true /* blocking */ );
+	}
+	// return host buffer with ray tracing results
+	return (Intersection*)rayBatchResult->hostBuffer;
+}
+
+Intersection* World::TraceBatchToVoid( const uint batchSize )
+{
+	// sanity checks
+	if (!rayBatchBuffer) FatalError( "TraceBatchToVoid: Batch not yet created." );
+	if (batchSize > SCRWIDTH * SCRHEIGHT) FatalError( "TraceBatchToVoid: batch is too large." );
+	if (batchSize > 0)
+	{
+		// copy the ray batch to the GPU
+		rayBatchBuffer->CopyToDevice();
+		// invoke ray tracing kernel
+		batchToVoidTracer->SetArgument( 5, (int)batchSize );
+		batchToVoidTracer->Run( batchSize );
 		// get results back from GPU
 		rayBatchResult->CopyFromDevice( true /* blocking */ );
 	}

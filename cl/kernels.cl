@@ -223,6 +223,32 @@ __kernel void traceBatch(
 	hitData[taskId * 2 + 1] = (voxel == 0 ? 0 : Nval) + (voxel << 16);
 }
 
+__kernel void traceBatchToVoid(
+	__read_only image3d_t grid,
+	__global const unsigned char* brick0, __global const unsigned char* brick1,
+	__global const unsigned char* brick2, __global const unsigned char* brick3,
+	const int batchSize, __global const float4* rayData, __global uint* hitData )
+{
+	// sanity check
+	const uint taskId = get_global_id( 0 );
+	if (taskId >= batchSize) return;
+	// fetch ray from buffer
+	const float4 O4 = rayData[taskId * 2 + 0];
+	const float4 D4 = rayData[taskId * 2 + 1];
+	// trace ray
+	float3 N;
+	float dist;
+	TraceRayToVoid(
+		(float4)(O4.x, O4.y, O4.z, 1),
+		(float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, brick0, brick1, brick2, brick3
+	);
+	// store query result
+	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
+	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
+	hitData[taskId * 2 + 1] = Nval;
+}
+
 __kernel void commit( const int taskCount, __global uint* commit,
 	__global uint* brick0, __global uint* brick1, __global uint* brick2, __global uint* brick3 )
 {
@@ -234,7 +260,7 @@ __kernel void commit( const int taskCount, __global uint* commit,
 		int brickId = commit[task + GRIDSIZE];
 		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + task * (BRICKSIZE * PAYLOADSIZE) / 4;
 		const uint offset = brickId * BRICKSIZE * PAYLOADSIZE / 4; // in dwords
-		uint* page = bricks[(offset / (CHUNKSIZE / 4)) & 3];
+		__global uint* page = bricks[(offset / (CHUNKSIZE / 4)) & 3];
 		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) page[(offset & (CHUNKSIZE / 4 - 1)) + i] = src[i];
 	}
 }

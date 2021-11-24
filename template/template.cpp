@@ -44,6 +44,7 @@ Game* CreateGame();
 // world access / C API implementation
 World* GetWorld() { return world; }
 void ClearWorld() { world->Clear(); }
+void FillWorld( const uint c ) { world->Fill( c ); }
 void WorldXScroll( const int offset ) { world->ScrollX( offset ); }
 void WorldYScroll( const int offset ) { world->ScrollY( offset ); }
 void WorldZScroll( const int offset ) { world->ScrollZ( offset ); }
@@ -260,6 +261,17 @@ Intersection Trace( const Ray& r )
 	i.N = (voxel == 0 ? 0 : Nval) + (voxel << 16);
 	return i;
 }
+Intersection TraceToVoid( const Ray& r )
+{
+	float3 N;
+	float dist;
+	Intersection i;
+	world->TraceRayToVoid( make_float4( r.O, 1 ), make_float4( r.D, 1 ), dist, N );
+	i.t = dist < r.t ? dist : 1e34f;
+	const uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
+	i.N = Nval;
+	return i;
+}
 Ray* GetBatchBuffer()
 {
 	if (Game::autoRendering) FatalError( "disable autoRendering for inline ray batch processing." );
@@ -269,6 +281,11 @@ Intersection* TraceBatch( const uint batchSize )
 {
 	if (Game::autoRendering) FatalError( "disable autoRendering for inline ray batch processing." );
 	return world->TraceBatch( batchSize );
+}
+Intersection* TraceBatchToVoid( const uint batchSize )
+{
+	if (Game::autoRendering) FatalError( "disable autoRendering for inline ray batch processing." );
+	return world->TraceBatchToVoid( batchSize );
 }
 
 uint RGB32to8( const uint c ) { return ((c >> 6) & 3) + (((c >> 13) & 7) << 2) + (((c >> 21) & 7) << 5); }

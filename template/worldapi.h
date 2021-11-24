@@ -2,6 +2,7 @@
 
 World* GetWorld();
 void ClearWorld();
+void FillWorld( const uint c );
 void WorldXScroll( const int offset );
 void WorldYScroll( const int offset );
 void WorldZScroll( const int offset );
@@ -81,11 +82,13 @@ void ZLine( const int3 pos, int l, const uint c );
 bool IsOccluded( const float3 P1, const float3 P2 );
 float Trace( const float3 P1, const float3 P2 );
 Intersection Trace( const Ray& r );
+Intersection TraceToVoid( const Ray& r );
 uint RGB32to8( const uint c );
 uint BGR32to8( const uint c );
 uint RGB16to32( const uint c );
 float GetRenderTime();
 Ray* GetBatchBuffer();
 Intersection* TraceBatch( const uint batchSize );
+Intersection* TraceBatchToVoid( const uint batchSize );
 
 // EOF
