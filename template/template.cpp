@@ -289,6 +289,7 @@ Intersection* TraceBatchToVoid( const uint batchSize )
 }
 
 uint RGB32to8( const uint c ) { return ((c >> 6) & 3) + (((c >> 13) & 7) << 2) + (((c >> 21) & 7) << 5); }
+uint RGB32to16( const uint c ) { return ((c >> 4) & 15) + (((c >> 12) & 15) << 4) + (((c >> 20) & 15) << 8); }
 uint BGR32to8( const uint c ) { return (((c >> 5) & 7) << 5) + (((c >> 13) & 7) << 2) + ((c >> 22) & 3); }
 uint RGB16to32( const uint c ) { return (((c >> 8) & 15) << 20) + (((c >> 4) & 15) << 12) + ((c & 15) << 4); }
 float GetRenderTime() { return world->GetRenderTime(); }
@@ -1538,7 +1539,18 @@ void Surface::LoadImage( const char* file )
 	{
 		buffer = (uint*)MALLOC64( width * height * sizeof( uint ) );
 		const int s = width * height;
-		for (int i = 0; i < s; i++) buffer[i] = (data[i * n + 0] << 16) + (data[i * n + 1] << 8) + data[i * n + 2];
+		if (n == 1) // greyscale
+		{
+			for (int i = 0; i < s; i++) 
+			{
+				const unsigned char p = data[i];
+				buffer[i] = p + (p << 8) + (p << 16);
+			}
+		}
+		else
+		{
+			for (int i = 0; i < s; i++) buffer[i] = (data[i * n + 0] << 16) + (data[i * n + 1] << 8) + data[i * n + 2];
+		}
 	}
 	stbi_image_free( data );
 }

@@ -99,6 +99,8 @@ void Advanced::GPURays()
 // -----------------------------------------------------------
 void Advanced::Tick( float deltaTime )
 {
-	CPURays();
-	// GPURays();
+	Timer t;
+	// CPURays();
+	GPURays();
+	printf( "%5.2fms\n", t.elapsed() * 1000 );
 }

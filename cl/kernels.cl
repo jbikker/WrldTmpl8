@@ -50,7 +50,6 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	const float3 D = GenerateCameraRay( screenPos, params );
 	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 	const float skyLightScale = params->skyLightScale;
-
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
 	if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ),1e20f);
 	const float3 BRDF1 = INVPI * ToFloatRGB( voxel );

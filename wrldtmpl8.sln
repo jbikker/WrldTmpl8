@@ -12,6 +12,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "benchmark", "benchmark.vcxp
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "advanced", "advanced.vcxproj", "{2915300A-1EAD-43C1-9824-241603FDECB1}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "meaningOfLife", "meaning.vcxproj", "{B83EB91E-1894-4759-B26B-36AE1E4B9E41}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -38,6 +40,10 @@ Global
 		{2915300A-1EAD-43C1-9824-241603FDECB1}.Debug|x64.Build.0 = Debug|x64
 		{2915300A-1EAD-43C1-9824-241603FDECB1}.Release|x64.ActiveCfg = Release|x64
 		{2915300A-1EAD-43C1-9824-241603FDECB1}.Release|x64.Build.0 = Release|x64
+		{B83EB91E-1894-4759-B26B-36AE1E4B9E41}.Debug|x64.ActiveCfg = Debug|x64
+		{B83EB91E-1894-4759-B26B-36AE1E4B9E41}.Debug|x64.Build.0 = Debug|x64
+		{B83EB91E-1894-4759-B26B-36AE1E4B9E41}.Release|x64.ActiveCfg = Release|x64
+		{B83EB91E-1894-4759-B26B-36AE1E4B9E41}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

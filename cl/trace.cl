@@ -32,7 +32,8 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
 	const bool originOutsideGrid = A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH;
 	float to = 0; // distance to travel to get into grid
-	if (steps == 999999 && originOutsideGrid)
+	uint last = 0;
+	if (originOutsideGrid)
 	{
 		// use slab test to clip ray origin against scene AABB
 		const float tx1 = -A.x * rV.x, tx2 = (MAPWIDTH - A.x) * rV.x;
@@ -41,8 +42,12 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		tmin = max( tmin, min( ty1, ty2 ) ), tmax = min( tmax, max( ty1, ty2 ) );
 		const float tz1 = -A.z * rV.z, tz2 = (MAPDEPTH - A.z) * rV.z;
 		tmin = max( tmin, min( tz1, tz2 ) ), tmax = min( tmax, max( tz1, tz2 ) );
-		if (tmax < tmin || tmax <= 0) return 0; /* ray misses scene */ else A += tmin * V; // new ray entry point
+		if (tmax < tmin || tmax <= 0) return 0; // ray misses scene 
+		A += tmin * V; // new ray entry point
 		to = tmin;
+		// update 'last', for correct handling of hits on the border of the map
+		if (A.y < 0.01f || A.y > (MAPHEIGHT - 1.01f)) last = 1;
+		if (A.z < 0.01f || A.z > (MAPDEPTH - 1.01f)) last = 2;
 	}
 	uint tp = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
 		clamp( (uint)A.z >> 3, 0u, 127u );
@@ -51,7 +56,6 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		(tp & 127) + ((bits >> 21) & 1), 0) - A * 0.125f) * rV;
 	float t = 0;
 	const float4 td = (float4)(DIR_X, DIR_Y, DIR_Z, 0) * rV;
-	uint last = 0;
 	do
 	{
 		// fetch brick from top grid
