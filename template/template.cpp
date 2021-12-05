@@ -1421,6 +1421,7 @@ bool Kernel::InitCL()
 	if (!CHECKCL( error )) return false;
 	// cleanup
 	delete devices;
+	clStarted = true;
 	return true;
 }
 
@@ -1428,20 +1429,10 @@ bool Kernel::InitCL()
 // ----------------------------------------------------------------------------
 void Kernel::KillCL()
 {
-	cl_int error;
-	if (!CHECKCL( error = clReleaseCommandQueue( queue2 ) ))
-	{
-		int w = 0;
-	}
-	if (!CHECKCL( error = clReleaseCommandQueue( queue ) ))
-	{
-		int w = 0;
-	}
-	if (!CHECKCL( error = clReleaseContext( context ) ))
-	{
-		int w = 0;
-	}
-	int w = 0;
+	if (!clStarted) return;
+	clReleaseCommandQueue( queue2 );
+	clReleaseCommandQueue( queue );
+	clReleaseContext( context );
 }
 
 // SetArgument methods
@@ -1541,7 +1532,7 @@ void Surface::LoadImage( const char* file )
 		const int s = width * height;
 		if (n == 1) // greyscale
 		{
-			for (int i = 0; i < s; i++) 
+			for (int i = 0; i < s; i++)
 			{
 				const unsigned char p = data[i];
 				buffer[i] = p + (p << 8) + (p << 16);

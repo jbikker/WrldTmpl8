@@ -222,7 +222,6 @@ class JobThread
 {
 public:
 	void CreateAndStartThread( unsigned int threadId );
-	void WaitForThreadToStop();
 	void Go();
 	void BackgroundTask();
 	HANDLE m_GoSignal, m_ThreadHandle;
@@ -245,7 +244,6 @@ public:
 protected:
 	friend class JobThread;
 	Job* GetNextJob();
-	Job* FindNextJob();
 	static JobManager* m_JobManager;
 	Job* m_JobList[256];
 	CRITICAL_SECTION m_CS;
@@ -272,7 +270,6 @@ bool RemoveFile( const char* f );
 string TextFileRead( const char* _File );
 int LineCount( const string s );
 void TextFileWrite( const string& text, const char* _File );
-string LowerCase( string s );
 
 // math
 inline float fminf( float a, float b ) { return a < b ? a : b; }
@@ -346,314 +343,314 @@ inline int3 operator >> ( int3& a, int b ) { return make_int3( a.x >> b, a.y >> 
 inline int4 operator << ( int4& a, int b ) { return make_int4( a.x << b, a.y << b, a.z << b, a.w << b ); }
 inline int4 operator >> ( int4& a, int b ) { return make_int4( a.x >> b, a.y >> b, a.z >> b, a.w >> b ); }
 
-inline float2 operator+( float2 a, float2 b ) { return make_float2( a.x + b.x, a.y + b.y ); }
-inline float2 operator+( float2 a, int2 b ) { return make_float2( a.x + (float)b.x, a.y + (float)b.y ); }
-inline float2 operator+( float2 a, uint2 b ) { return make_float2( a.x + (float)b.x, a.y + (float)b.y ); }
-inline float2 operator+( int2 a, float2 b ) { return make_float2( (float)a.x + b.x, (float)a.y + b.y ); }
-inline float2 operator+( uint2 a, float2 b ) { return make_float2( (float)a.x + b.x, (float)a.y + b.y ); }
-inline void operator+=( float2& a, float2 b ) { a.x += b.x;	a.y += b.y; }
-inline void operator+=( float2& a, int2 b ) { a.x += (float)b.x; a.y += (float)b.y; }
-inline void operator+=( float2& a, uint2 b ) { a.x += (float)b.x; a.y += (float)b.y; }
-inline float2 operator+( float2 a, float b ) { return make_float2( a.x + b, a.y + b ); }
-inline float2 operator+( float2 a, int b ) { return make_float2( a.x + (float)b, a.y + (float)b ); }
-inline float2 operator+( float2 a, uint b ) { return make_float2( a.x + (float)b, a.y + (float)b ); }
-inline float2 operator+( float b, float2 a ) { return make_float2( a.x + b, a.y + b ); }
+inline float2 operator+( const float2& a, const float2& b ) { return make_float2( a.x + b.x, a.y + b.y ); }
+inline float2 operator+( const float2& a, const int2& b ) { return make_float2( a.x + (float)b.x, a.y + (float)b.y ); }
+inline float2 operator+( const float2& a, const uint2& b ) { return make_float2( a.x + (float)b.x, a.y + (float)b.y ); }
+inline float2 operator+( const int2& a, const float2& b ) { return make_float2( (float)a.x + b.x, (float)a.y + b.y ); }
+inline float2 operator+( const uint2& a, const float2& b ) { return make_float2( (float)a.x + b.x, (float)a.y + b.y ); }
+inline void operator+=( float2& a, const float2& b ) { a.x += b.x;	a.y += b.y; }
+inline void operator+=( float2& a, const int2& b ) { a.x += (float)b.x; a.y += (float)b.y; }
+inline void operator+=( float2& a, const uint2& b ) { a.x += (float)b.x; a.y += (float)b.y; }
+inline float2 operator+( const float2& a, float b ) { return make_float2( a.x + b, a.y + b ); }
+inline float2 operator+( const float2& a, int b ) { return make_float2( a.x + (float)b, a.y + (float)b ); }
+inline float2 operator+( const float2& a, uint b ) { return make_float2( a.x + (float)b, a.y + (float)b ); }
+inline float2 operator+( float b, const float2& a ) { return make_float2( a.x + b, a.y + b ); }
 inline void operator+=( float2& a, float b ) { a.x += b; a.y += b; }
 inline void operator+=( float2& a, int b ) { a.x += (float)b; a.y += (float)b; }
 inline void operator+=( float2& a, uint b ) { a.x += (float)b;	a.y += (float)b; }
-inline int2 operator+( int2 a, int2 b ) { return make_int2( a.x + b.x, a.y + b.y ); }
-inline void operator+=( int2& a, int2 b ) { a.x += b.x;	a.y += b.y; }
-inline int2 operator+( int2 a, int b ) { return make_int2( a.x + b, a.y + b ); }
-inline int2 operator+( int b, int2 a ) { return make_int2( a.x + b, a.y + b ); }
+inline int2 operator+( const int2& a, const int2& b ) { return make_int2( a.x + b.x, a.y + b.y ); }
+inline void operator+=( int2& a, const int2& b ) { a.x += b.x;	a.y += b.y; }
+inline int2 operator+( const int2& a, int b ) { return make_int2( a.x + b, a.y + b ); }
+inline int2 operator+( int b, const int2& a ) { return make_int2( a.x + b, a.y + b ); }
 inline void operator+=( int2& a, int b ) { a.x += b;	a.y += b; }
-inline uint2 operator+( uint2 a, uint2 b ) { return make_uint2( a.x + b.x, a.y + b.y ); }
-inline void operator+=( uint2& a, uint2 b ) { a.x += b.x;	a.y += b.y; }
-inline uint2 operator+( uint2 a, uint b ) { return make_uint2( a.x + b, a.y + b ); }
-inline uint2 operator+( uint b, uint2 a ) { return make_uint2( a.x + b, a.y + b ); }
+inline uint2 operator+( const uint2& a, const uint2& b ) { return make_uint2( a.x + b.x, a.y + b.y ); }
+inline void operator+=( uint2& a, const uint2& b ) { a.x += b.x;	a.y += b.y; }
+inline uint2 operator+( const uint2& a, uint b ) { return make_uint2( a.x + b, a.y + b ); }
+inline uint2 operator+( uint b, const uint2& a ) { return make_uint2( a.x + b, a.y + b ); }
 inline void operator+=( uint2& a, uint b ) { a.x += b;	a.y += b; }
-inline float3 operator+( float3 a, float3 b ) { return make_float3( a.x + b.x, a.y + b.y, a.z + b.z ); }
-inline float3 operator+( float3 a, int3 b ) { return make_float3( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z ); }
-inline float3 operator+( float3 a, uint3 b ) { return make_float3( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z ); }
-inline float3 operator+( int3 a, float3 b ) { return make_float3( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z ); }
-inline float3 operator+( uint3 a, float3 b ) { return make_float3( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z ); }
-inline void operator+=( float3& a, float3 b ) { a.x += b.x;	a.y += b.y;	a.z += b.z; }
-inline void operator+=( float3& a, int3 b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; }
-inline void operator+=( float3& a, uint3 b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; }
-inline float3 operator+( float3 a, float b ) { return make_float3( a.x + b, a.y + b, a.z + b ); }
-inline float3 operator+( float3 a, int b ) { return make_float3( a.x + (float)b, a.y + (float)b, a.z + (float)b ); }
-inline float3 operator+( float3 a, uint b ) { return make_float3( a.x + (float)b, a.y + (float)b, a.z + (float)b ); }
+inline float3 operator+( const float3& a, const float3& b ) { return make_float3( a.x + b.x, a.y + b.y, a.z + b.z ); }
+inline float3 operator+( const float3& a, const int3& b ) { return make_float3( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z ); }
+inline float3 operator+( const float3& a, const uint3& b ) { return make_float3( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z ); }
+inline float3 operator+( const int3& a, const float3& b ) { return make_float3( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z ); }
+inline float3 operator+( const uint3& a, const float3& b ) { return make_float3( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z ); }
+inline void operator+=( float3& a, const float3& b ) { a.x += b.x;	a.y += b.y;	a.z += b.z; }
+inline void operator+=( float3& a, const int3& b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; }
+inline void operator+=( float3& a, const uint3& b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; }
+inline float3 operator+( const float3& a, float b ) { return make_float3( a.x + b, a.y + b, a.z + b ); }
+inline float3 operator+( const float3& a, int b ) { return make_float3( a.x + (float)b, a.y + (float)b, a.z + (float)b ); }
+inline float3 operator+( const float3& a, uint b ) { return make_float3( a.x + (float)b, a.y + (float)b, a.z + (float)b ); }
 inline void operator+=( float3& a, float b ) { a.x += b; a.y += b;	a.z += b; }
 inline void operator+=( float3& a, int b ) { a.x += (float)b; a.y += (float)b; a.z += (float)b; }
 inline void operator+=( float3& a, uint b ) { a.x += (float)b; a.y += (float)b; a.z += (float)b; }
-inline int3 operator+( int3 a, int3 b ) { return make_int3( a.x + b.x, a.y + b.y, a.z + b.z ); }
-inline void operator+=( int3& a, int3 b ) { a.x += b.x;	a.y += b.y;	a.z += b.z; }
-inline int3 operator+( int3 a, int b ) { return make_int3( a.x + b, a.y + b, a.z + b ); }
+inline int3 operator+( const int3& a, const int3& b ) { return make_int3( a.x + b.x, a.y + b.y, a.z + b.z ); }
+inline void operator+=( int3& a, const int3& b ) { a.x += b.x;	a.y += b.y;	a.z += b.z; }
+inline int3 operator+( const int3& a, int b ) { return make_int3( a.x + b, a.y + b, a.z + b ); }
 inline void operator+=( int3& a, int b ) { a.x += b;	a.y += b;	a.z += b; }
-inline uint3 operator+( uint3 a, uint3 b ) { return make_uint3( a.x + b.x, a.y + b.y, a.z + b.z ); }
-inline void operator+=( uint3& a, uint3 b ) { a.x += b.x;	a.y += b.y;	a.z += b.z; }
-inline uint3 operator+( uint3 a, uint b ) { return make_uint3( a.x + b, a.y + b, a.z + b ); }
+inline uint3 operator+( const uint3& a, const uint3& b ) { return make_uint3( a.x + b.x, a.y + b.y, a.z + b.z ); }
+inline void operator+=( uint3& a, const uint3& b ) { a.x += b.x;	a.y += b.y;	a.z += b.z; }
+inline uint3 operator+( const uint3& a, uint b ) { return make_uint3( a.x + b, a.y + b, a.z + b ); }
 inline void operator+=( uint3& a, uint b ) { a.x += b;	a.y += b;	a.z += b; }
-inline int3 operator+( int b, int3 a ) { return make_int3( a.x + b, a.y + b, a.z + b ); }
-inline uint3 operator+( uint b, uint3 a ) { return make_uint3( a.x + b, a.y + b, a.z + b ); }
-inline float3 operator+( float b, float3 a ) { return make_float3( a.x + b, a.y + b, a.z + b ); }
-inline float4 operator+( float4 a, float4 b ) { return make_float4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
-inline float4 operator+( float4 a, int4 b ) { return make_float4( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z, a.w + (float)b.w ); }
-inline float4 operator+( float4 a, uint4 b ) { return make_float4( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z, a.w + (float)b.w ); }
-inline float4 operator+( int4 a, float4 b ) { return make_float4( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z, (float)a.w + b.w ); }
-inline float4 operator+( uint4 a, float4 b ) { return make_float4( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z, (float)a.w + b.w ); }
-inline void operator+=( float4& a, float4 b ) { a.x += b.x;	a.y += b.y;	a.z += b.z;	a.w += b.w; }
-inline void operator+=( float4& a, int4 b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; a.w += (float)b.w; }
-inline void operator+=( float4& a, uint4 b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; a.w += (float)b.w; }
-inline float4 operator+( float4 a, float b ) { return make_float4( a.x + b, a.y + b, a.z + b, a.w + b ); }
-inline float4 operator+( float4 a, int b ) { return make_float4( a.x + (float)b, a.y + (float)b, a.z + (float)b, a.w + (float)b ); }
-inline float4 operator+( float4 a, uint b ) { return make_float4( a.x + (float)b, a.y + (float)b, a.z + (float)b, a.w + (float)b ); }
-inline float4 operator+( float b, float4 a ) { return make_float4( a.x + b, a.y + b, a.z + b, a.w + b ); }
+inline int3 operator+( int b, const int3& a ) { return make_int3( a.x + b, a.y + b, a.z + b ); }
+inline uint3 operator+( uint b, const uint3& a ) { return make_uint3( a.x + b, a.y + b, a.z + b ); }
+inline float3 operator+( float b, const float3& a ) { return make_float3( a.x + b, a.y + b, a.z + b ); }
+inline float4 operator+( const float4& a, const float4& b ) { return make_float4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
+inline float4 operator+( const float4& a, const int4& b ) { return make_float4( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z, a.w + (float)b.w ); }
+inline float4 operator+( const float4& a, const uint4& b ) { return make_float4( a.x + (float)b.x, a.y + (float)b.y, a.z + (float)b.z, a.w + (float)b.w ); }
+inline float4 operator+( const int4& a, const float4& b ) { return make_float4( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z, (float)a.w + b.w ); }
+inline float4 operator+( const uint4& a, const float4& b ) { return make_float4( (float)a.x + b.x, (float)a.y + b.y, (float)a.z + b.z, (float)a.w + b.w ); }
+inline void operator+=( float4& a, const float4& b ) { a.x += b.x;	a.y += b.y;	a.z += b.z;	a.w += b.w; }
+inline void operator+=( float4& a, const int4& b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; a.w += (float)b.w; }
+inline void operator+=( float4& a, const uint4& b ) { a.x += (float)b.x; a.y += (float)b.y; a.z += (float)b.z; a.w += (float)b.w; }
+inline float4 operator+( const float4& a, float b ) { return make_float4( a.x + b, a.y + b, a.z + b, a.w + b ); }
+inline float4 operator+( const float4& a, int b ) { return make_float4( a.x + (float)b, a.y + (float)b, a.z + (float)b, a.w + (float)b ); }
+inline float4 operator+( const float4& a, uint b ) { return make_float4( a.x + (float)b, a.y + (float)b, a.z + (float)b, a.w + (float)b ); }
+inline float4 operator+( float b, const float4& a ) { return make_float4( a.x + b, a.y + b, a.z + b, a.w + b ); }
 inline void operator+=( float4& a, float b ) { a.x += b;	a.y += b;	a.z += b;	a.w += b; }
 inline void operator+=( float4& a, int b ) { a.x += (float)b; a.y += (float)b; a.z += (float)b; a.w += (float)b; }
 inline void operator+=( float4& a, uint b ) { a.x += (float)b; a.y += (float)b; a.z += (float)b; a.w += (float)b; }
-inline int4 operator+( int4 a, int4 b ) { return make_int4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
-inline void operator+=( int4& a, int4 b ) { a.x += b.x;	a.y += b.y;	a.z += b.z;	a.w += b.w; }
-inline int4 operator+( int4 a, int b ) { return make_int4( a.x + b, a.y + b, a.z + b, a.w + b ); }
-inline int4 operator+( int b, int4 a ) { return make_int4( a.x + b, a.y + b, a.z + b, a.w + b ); }
+inline int4 operator+( const int4& a, const int4& b ) { return make_int4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
+inline void operator+=( int4& a, const int4& b ) { a.x += b.x;	a.y += b.y;	a.z += b.z;	a.w += b.w; }
+inline int4 operator+( const int4& a, int b ) { return make_int4( a.x + b, a.y + b, a.z + b, a.w + b ); }
+inline int4 operator+( int b, const int4& a ) { return make_int4( a.x + b, a.y + b, a.z + b, a.w + b ); }
 inline void operator+=( int4& a, int b ) { a.x += b;	a.y += b;	a.z += b;	a.w += b; }
-inline uint4 operator+( uint4 a, uint4 b ) { return make_uint4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
-inline void operator+=( uint4& a, uint4 b ) { a.x += b.x;	a.y += b.y;	a.z += b.z;	a.w += b.w; }
-inline uint4 operator+( uint4 a, uint b ) { return make_uint4( a.x + b, a.y + b, a.z + b, a.w + b ); }
-inline uint4 operator+( uint b, uint4 a ) { return make_uint4( a.x + b, a.y + b, a.z + b, a.w + b ); }
+inline uint4 operator+( const uint4& a, const uint4& b ) { return make_uint4( a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w ); }
+inline void operator+=( uint4& a, const uint4& b ) { a.x += b.x;	a.y += b.y;	a.z += b.z;	a.w += b.w; }
+inline uint4 operator+( const uint4& a, uint b ) { return make_uint4( a.x + b, a.y + b, a.z + b, a.w + b ); }
+inline uint4 operator+( uint b, const uint4& a ) { return make_uint4( a.x + b, a.y + b, a.z + b, a.w + b ); }
 inline void operator+=( uint4& a, uint b ) { a.x += b;	a.y += b;	a.z += b;	a.w += b; }
 
-inline float2 operator-( float2 a, float2 b ) { return make_float2( a.x - b.x, a.y - b.y ); }
-inline float2 operator-( float2 a, int2 b ) { return make_float2( a.x - (float)b.x, a.y - (float)b.y ); }
-inline float2 operator-( float2 a, uint2 b ) { return make_float2( a.x - (float)b.x, a.y - (float)b.y ); }
-inline float2 operator-( int2 a, float2 b ) { return make_float2( (float)a.x - b.x, (float)a.y - b.y ); }
-inline float2 operator-( uint2 a, float2 b ) { return make_float2( (float)a.x - b.x, (float)a.y - b.y ); }
-inline void operator-=( float2& a, float2 b ) { a.x -= b.x;	a.y -= b.y; }
-inline void operator-=( float2& a, int2 b ) { a.x -= (float)b.x; a.y -= (float)b.y; }
-inline void operator-=( float2& a, uint2 b ) { a.x -= (float)b.x; a.y -= (float)b.y; }
-inline float2 operator-( float2 a, float b ) { return make_float2( a.x - b, a.y - b ); }
-inline float2 operator-( float2 a, int b ) { return make_float2( a.x - (float)b, a.y - (float)b ); }
-inline float2 operator-( float2 a, uint b ) { return make_float2( a.x - (float)b, a.y - (float)b ); }
-inline float2 operator-( float b, float2 a ) { return make_float2( b - a.x, b - a.y ); }
+inline float2 operator-( const float2& a, const float2& b ) { return make_float2( a.x - b.x, a.y - b.y ); }
+inline float2 operator-( const float2& a, const int2& b ) { return make_float2( a.x - (float)b.x, a.y - (float)b.y ); }
+inline float2 operator-( const float2& a, const uint2& b ) { return make_float2( a.x - (float)b.x, a.y - (float)b.y ); }
+inline float2 operator-( const int2& a, const float2& b ) { return make_float2( (float)a.x - b.x, (float)a.y - b.y ); }
+inline float2 operator-( const uint2& a, const float2& b ) { return make_float2( (float)a.x - b.x, (float)a.y - b.y ); }
+inline void operator-=( float2& a, const float2& b ) { a.x -= b.x;	a.y -= b.y; }
+inline void operator-=( float2& a, const int2& b ) { a.x -= (float)b.x; a.y -= (float)b.y; }
+inline void operator-=( float2& a, const uint2& b ) { a.x -= (float)b.x; a.y -= (float)b.y; }
+inline float2 operator-( const float2& a, float b ) { return make_float2( a.x - b, a.y - b ); }
+inline float2 operator-( const float2& a, int b ) { return make_float2( a.x - (float)b, a.y - (float)b ); }
+inline float2 operator-( const float2& a, uint b ) { return make_float2( a.x - (float)b, a.y - (float)b ); }
+inline float2 operator-( float b, const float2& a ) { return make_float2( b - a.x, b - a.y ); }
 inline void operator-=( float2& a, float b ) { a.x -= b; a.y -= b; }
 inline void operator-=( float2& a, int b ) { a.x -= (float)b; a.y -= (float)b; }
 inline void operator-=( float2& a, uint b ) { a.x -= (float)b; a.y -= (float)b; }
-inline int2 operator-( int2 a, int2 b ) { return make_int2( a.x - b.x, a.y - b.y ); }
-inline void operator-=( int2& a, int2 b ) { a.x -= b.x;	a.y -= b.y; }
-inline int2 operator-( int2 a, int b ) { return make_int2( a.x - b, a.y - b ); }
-inline int2 operator-( int b, int2 a ) { return make_int2( b - a.x, b - a.y ); }
+inline int2 operator-( const int2& a, const int2& b ) { return make_int2( a.x - b.x, a.y - b.y ); }
+inline void operator-=( int2& a, const int2& b ) { a.x -= b.x;	a.y -= b.y; }
+inline int2 operator-( const int2& a, int b ) { return make_int2( a.x - b, a.y - b ); }
+inline int2 operator-( int b, const int2& a ) { return make_int2( b - a.x, b - a.y ); }
 inline void operator-=( int2& a, int b ) { a.x -= b;	a.y -= b; }
-inline uint2 operator-( uint2 a, uint2 b ) { return make_uint2( a.x - b.x, a.y - b.y ); }
-inline void operator-=( uint2& a, uint2 b ) { a.x -= b.x;	a.y -= b.y; }
-inline uint2 operator-( uint2 a, uint b ) { return make_uint2( a.x - b, a.y - b ); }
-inline uint2 operator-( uint b, uint2 a ) { return make_uint2( b - a.x, b - a.y ); }
+inline uint2 operator-( const uint2& a, const uint2& b ) { return make_uint2( a.x - b.x, a.y - b.y ); }
+inline void operator-=( uint2& a, const uint2& b ) { a.x -= b.x;	a.y -= b.y; }
+inline uint2 operator-( const uint2& a, uint b ) { return make_uint2( a.x - b, a.y - b ); }
+inline uint2 operator-( uint b, const uint2& a ) { return make_uint2( b - a.x, b - a.y ); }
 inline void operator-=( uint2& a, uint b ) { a.x -= b;	a.y -= b; }
-inline float3 operator-( float3 a, float3 b ) { return make_float3( a.x - b.x, a.y - b.y, a.z - b.z ); }
-inline float3 operator-( float3 a, int3 b ) { return make_float3( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z ); }
-inline float3 operator-( float3 a, uint3 b ) { return make_float3( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z ); }
-inline float3 operator-( int3 a, float3 b ) { return make_float3( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z ); }
-inline float3 operator-( uint3 a, float3 b ) { return make_float3( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z ); }
-inline void operator-=( float3& a, float3 b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z; }
-inline void operator-=( float3& a, int3 b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; }
-inline void operator-=( float3& a, uint3 b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; }
-inline float3 operator-( float3 a, float b ) { return make_float3( a.x - b, a.y - b, a.z - b ); }
-inline float3 operator-( float3 a, int b ) { return make_float3( a.x - (float)b, a.y - (float)b, a.z - (float)b ); }
-inline float3 operator-( float3 a, uint b ) { return make_float3( a.x - (float)b, a.y - (float)b, a.z - (float)b ); }
-inline float3 operator-( float b, float3 a ) { return make_float3( b - a.x, b - a.y, b - a.z ); }
+inline float3 operator-( const float3& a, const float3& b ) { return make_float3( a.x - b.x, a.y - b.y, a.z - b.z ); }
+inline float3 operator-( const float3& a, const int3& b ) { return make_float3( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z ); }
+inline float3 operator-( const float3& a, const uint3& b ) { return make_float3( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z ); }
+inline float3 operator-( const int3& a, const float3& b ) { return make_float3( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z ); }
+inline float3 operator-( const uint3& a, const float3& b ) { return make_float3( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z ); }
+inline void operator-=( float3& a, const float3& b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z; }
+inline void operator-=( float3& a, const int3& b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; }
+inline void operator-=( float3& a, const uint3& b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; }
+inline float3 operator-( const float3& a, float b ) { return make_float3( a.x - b, a.y - b, a.z - b ); }
+inline float3 operator-( const float3& a, int b ) { return make_float3( a.x - (float)b, a.y - (float)b, a.z - (float)b ); }
+inline float3 operator-( const float3& a, uint b ) { return make_float3( a.x - (float)b, a.y - (float)b, a.z - (float)b ); }
+inline float3 operator-( float b, const float3& a ) { return make_float3( b - a.x, b - a.y, b - a.z ); }
 inline void operator-=( float3& a, float b ) { a.x -= b; a.y -= b; a.z -= b; }
 inline void operator-=( float3& a, int b ) { a.x -= (float)b; a.y -= (float)b; a.z -= (float)b; }
 inline void operator-=( float3& a, uint b ) { a.x -= (float)b;	a.y -= (float)b; a.z -= (float)b; }
-inline int3 operator-( int3 a, int3 b ) { return make_int3( a.x - b.x, a.y - b.y, a.z - b.z ); }
-inline void operator-=( int3& a, int3 b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z; }
-inline int3 operator-( int3 a, int b ) { return make_int3( a.x - b, a.y - b, a.z - b ); }
-inline int3 operator-( int b, int3 a ) { return make_int3( b - a.x, b - a.y, b - a.z ); }
+inline int3 operator-( const int3& a, const int3& b ) { return make_int3( a.x - b.x, a.y - b.y, a.z - b.z ); }
+inline void operator-=( int3& a, const int3& b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z; }
+inline int3 operator-( const int3& a, int b ) { return make_int3( a.x - b, a.y - b, a.z - b ); }
+inline int3 operator-( int b, const int3& a ) { return make_int3( b - a.x, b - a.y, b - a.z ); }
 inline void operator-=( int3& a, int b ) { a.x -= b;	a.y -= b;	a.z -= b; }
-inline uint3 operator-( uint3 a, uint3 b ) { return make_uint3( a.x - b.x, a.y - b.y, a.z - b.z ); }
-inline void operator-=( uint3& a, uint3 b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z; }
-inline uint3 operator-( uint3 a, uint b ) { return make_uint3( a.x - b, a.y - b, a.z - b ); }
-inline uint3 operator-( uint b, uint3 a ) { return make_uint3( b - a.x, b - a.y, b - a.z ); }
+inline uint3 operator-( const uint3& a, const uint3& b ) { return make_uint3( a.x - b.x, a.y - b.y, a.z - b.z ); }
+inline void operator-=( uint3& a, const uint3& b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z; }
+inline uint3 operator-( const uint3& a, uint b ) { return make_uint3( a.x - b, a.y - b, a.z - b ); }
+inline uint3 operator-( uint b, const uint3& a ) { return make_uint3( b - a.x, b - a.y, b - a.z ); }
 inline void operator-=( uint3& a, uint b ) { a.x -= b;	a.y -= b;	a.z -= b; }
-inline float4 operator-( float4 a, float4 b ) { return make_float4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
-inline float4 operator-( float4 a, int4 b ) { return make_float4( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z, a.w - (float)b.w ); }
-inline float4 operator-( float4 a, uint4 b ) { return make_float4( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z, a.w - (float)b.w ); }
-inline float4 operator-( int4 a, float4 b ) { return make_float4( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z, (float)a.w - b.w ); }
-inline float4 operator-( uint4 a, float4 b ) { return make_float4( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z, (float)a.w - b.w ); }
-inline void operator-=( float4& a, float4 b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z;	a.w -= b.w; }
-inline void operator-=( float4& a, int4 b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; a.w -= (float)b.w; }
-inline void operator-=( float4& a, uint4 b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; a.w -= (float)b.w; }
-inline float4 operator-( float4 a, float b ) { return make_float4( a.x - b, a.y - b, a.z - b, a.w - b ); }
-inline float4 operator-( float4 a, int b ) { return make_float4( a.x - (float)b, a.y - (float)b, a.z - (float)b, a.w - (float)b ); }
-inline float4 operator-( float4 a, uint b ) { return make_float4( a.x - (float)b, a.y - (float)b, a.z - (float)b, a.w - (float)b ); }
+inline float4 operator-( const float4& a, const float4& b ) { return make_float4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
+inline float4 operator-( const float4& a, const int4& b ) { return make_float4( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z, a.w - (float)b.w ); }
+inline float4 operator-( const float4& a, const uint4& b ) { return make_float4( a.x - (float)b.x, a.y - (float)b.y, a.z - (float)b.z, a.w - (float)b.w ); }
+inline float4 operator-( const int4& a, const float4& b ) { return make_float4( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z, (float)a.w - b.w ); }
+inline float4 operator-( const uint4& a, const float4& b ) { return make_float4( (float)a.x - b.x, (float)a.y - b.y, (float)a.z - b.z, (float)a.w - b.w ); }
+inline void operator-=( float4& a, const float4& b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z;	a.w -= b.w; }
+inline void operator-=( float4& a, const int4& b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; a.w -= (float)b.w; }
+inline void operator-=( float4& a, const uint4& b ) { a.x -= (float)b.x; a.y -= (float)b.y; a.z -= (float)b.z; a.w -= (float)b.w; }
+inline float4 operator-( const float4& a, float b ) { return make_float4( a.x - b, a.y - b, a.z - b, a.w - b ); }
+inline float4 operator-( const float4& a, int b ) { return make_float4( a.x - (float)b, a.y - (float)b, a.z - (float)b, a.w - (float)b ); }
+inline float4 operator-( const float4& a, uint b ) { return make_float4( a.x - (float)b, a.y - (float)b, a.z - (float)b, a.w - (float)b ); }
 inline void operator-=( float4& a, float b ) { a.x -= b; a.y -= b; a.z -= b; a.w -= b; }
 inline void operator-=( float4& a, int b ) { a.x -= (float)b; a.y -= (float)b; a.z -= (float)b; a.w -= (float)b; }
 inline void operator-=( float4& a, uint b ) { a.x -= (float)b; a.y -= (float)b; a.z -= (float)b; a.w -= (float)b; }
-inline int4 operator-( int4 a, int4 b ) { return make_int4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
-inline void operator-=( int4& a, int4 b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z;	a.w -= b.w; }
-inline int4 operator-( int4 a, int b ) { return make_int4( a.x - b, a.y - b, a.z - b, a.w - b ); }
-inline int4 operator-( int b, int4 a ) { return make_int4( b - a.x, b - a.y, b - a.z, b - a.w ); }
+inline int4 operator-( const int4& a, const int4& b ) { return make_int4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
+inline void operator-=( int4& a, const int4& b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z;	a.w -= b.w; }
+inline int4 operator-( const int4& a, int b ) { return make_int4( a.x - b, a.y - b, a.z - b, a.w - b ); }
+inline int4 operator-( int b, const int4& a ) { return make_int4( b - a.x, b - a.y, b - a.z, b - a.w ); }
 inline void operator-=( int4& a, int b ) { a.x -= b;	a.y -= b;	a.z -= b;	a.w -= b; }
-inline uint4 operator-( uint4 a, uint4 b ) { return make_uint4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
-inline void operator-=( uint4& a, uint4 b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z;	a.w -= b.w; }
-inline uint4 operator-( uint4 a, uint b ) { return make_uint4( a.x - b, a.y - b, a.z - b, a.w - b ); }
-inline uint4 operator-( uint b, uint4 a ) { return make_uint4( b - a.x, b - a.y, b - a.z, b - a.w ); }
+inline uint4 operator-( const uint4& a, const uint4& b ) { return make_uint4( a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w ); }
+inline void operator-=( uint4& a, const uint4& b ) { a.x -= b.x;	a.y -= b.y;	a.z -= b.z;	a.w -= b.w; }
+inline uint4 operator-( const uint4& a, uint b ) { return make_uint4( a.x - b, a.y - b, a.z - b, a.w - b ); }
+inline uint4 operator-( uint b, const uint4& a ) { return make_uint4( b - a.x, b - a.y, b - a.z, b - a.w ); }
 inline void operator-=( uint4& a, uint b ) { a.x -= b;	a.y -= b;	a.z -= b;	a.w -= b; }
 
-inline float2 operator*( float2 a, float2 b ) { return make_float2( a.x * b.x, a.y * b.y ); }
-inline void operator*=( float2& a, float2 b ) { a.x *= b.x;	a.y *= b.y; }
-inline float2 operator*( float2 a, float b ) { return make_float2( a.x * b, a.y * b ); }
-inline float2 operator*( float b, float2 a ) { return make_float2( b * a.x, b * a.y ); }
+inline float2 operator*( const float2& a, const float2& b ) { return make_float2( a.x * b.x, a.y * b.y ); }
+inline void operator*=( float2& a, const float2& b ) { a.x *= b.x;	a.y *= b.y; }
+inline float2 operator*( const float2& a, float b ) { return make_float2( a.x * b, a.y * b ); }
+inline float2 operator*( float b, const float2& a ) { return make_float2( b * a.x, b * a.y ); }
 inline void operator*=( float2& a, float b ) { a.x *= b;	a.y *= b; }
-inline int2 operator*( int2 a, int2 b ) { return make_int2( a.x * b.x, a.y * b.y ); }
-inline void operator*=( int2& a, int2 b ) { a.x *= b.x;	a.y *= b.y; }
-inline int2 operator*( int2 a, int b ) { return make_int2( a.x * b, a.y * b ); }
-inline int2 operator*( int b, int2 a ) { return make_int2( b * a.x, b * a.y ); }
+inline int2 operator*( const int2& a, const int2& b ) { return make_int2( a.x * b.x, a.y * b.y ); }
+inline void operator*=( int2& a, const int2& b ) { a.x *= b.x;	a.y *= b.y; }
+inline int2 operator*( const int2& a, int b ) { return make_int2( a.x * b, a.y * b ); }
+inline int2 operator*( int b, const int2& a ) { return make_int2( b * a.x, b * a.y ); }
 inline void operator*=( int2& a, int b ) { a.x *= b;	a.y *= b; }
-inline uint2 operator*( uint2 a, uint2 b ) { return make_uint2( a.x * b.x, a.y * b.y ); }
-inline void operator*=( uint2& a, uint2 b ) { a.x *= b.x;	a.y *= b.y; }
-inline uint2 operator*( uint2 a, uint b ) { return make_uint2( a.x * b, a.y * b ); }
-inline uint2 operator*( uint b, uint2 a ) { return make_uint2( b * a.x, b * a.y ); }
+inline uint2 operator*( const uint2& a, const uint2& b ) { return make_uint2( a.x * b.x, a.y * b.y ); }
+inline void operator*=( uint2& a, const uint2& b ) { a.x *= b.x;	a.y *= b.y; }
+inline uint2 operator*( const uint2& a, uint b ) { return make_uint2( a.x * b, a.y * b ); }
+inline uint2 operator*( uint b, const uint2& a ) { return make_uint2( b * a.x, b * a.y ); }
 inline void operator*=( uint2& a, uint b ) { a.x *= b;	a.y *= b; }
-inline float3 operator*( float3 a, float3 b ) { return make_float3( a.x * b.x, a.y * b.y, a.z * b.z ); }
-inline void operator*=( float3& a, float3 b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z; }
-inline float3 operator*( float3 a, float b ) { return make_float3( a.x * b, a.y * b, a.z * b ); }
-inline float3 operator*( float b, float3 a ) { return make_float3( b * a.x, b * a.y, b * a.z ); }
+inline float3 operator*( const float3& a, const float3& b ) { return make_float3( a.x * b.x, a.y * b.y, a.z * b.z ); }
+inline void operator*=( float3& a, const float3& b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z; }
+inline float3 operator*( const float3& a, float b ) { return make_float3( a.x * b, a.y * b, a.z * b ); }
+inline float3 operator*( float b, const float3& a ) { return make_float3( b * a.x, b * a.y, b * a.z ); }
 inline void operator*=( float3& a, float b ) { a.x *= b;	a.y *= b;	a.z *= b; }
-inline int3 operator*( int3 a, int3 b ) { return make_int3( a.x * b.x, a.y * b.y, a.z * b.z ); }
-inline void operator*=( int3& a, int3 b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z; }
-inline int3 operator*( int3 a, int b ) { return make_int3( a.x * b, a.y * b, a.z * b ); }
-inline int3 operator*( int b, int3 a ) { return make_int3( b * a.x, b * a.y, b * a.z ); }
+inline int3 operator*( const int3& a, const int3& b ) { return make_int3( a.x * b.x, a.y * b.y, a.z * b.z ); }
+inline void operator*=( int3& a, const int3& b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z; }
+inline int3 operator*( const int3& a, int b ) { return make_int3( a.x * b, a.y * b, a.z * b ); }
+inline int3 operator*( int b, const int3& a ) { return make_int3( b * a.x, b * a.y, b * a.z ); }
 inline void operator*=( int3& a, int b ) { a.x *= b;	a.y *= b;	a.z *= b; }
-inline uint3 operator*( uint3 a, uint3 b ) { return make_uint3( a.x * b.x, a.y * b.y, a.z * b.z ); }
-inline void operator*=( uint3& a, uint3 b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z; }
-inline uint3 operator*( uint3 a, uint b ) { return make_uint3( a.x * b, a.y * b, a.z * b ); }
-inline uint3 operator*( uint b, uint3 a ) { return make_uint3( b * a.x, b * a.y, b * a.z ); }
+inline uint3 operator*( const uint3& a, const uint3& b ) { return make_uint3( a.x * b.x, a.y * b.y, a.z * b.z ); }
+inline void operator*=( uint3& a, const uint3& b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z; }
+inline uint3 operator*( const uint3& a, uint b ) { return make_uint3( a.x * b, a.y * b, a.z * b ); }
+inline uint3 operator*( uint b, const uint3& a ) { return make_uint3( b * a.x, b * a.y, b * a.z ); }
 inline void operator*=( uint3& a, uint b ) { a.x *= b;	a.y *= b;	a.z *= b; }
-inline float4 operator*( float4 a, float4 b ) { return make_float4( a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w ); }
-inline void operator*=( float4& a, float4 b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z;	a.w *= b.w; }
-inline float4 operator*( float4 a, float b ) { return make_float4( a.x * b, a.y * b, a.z * b, a.w * b ); }
-inline float4 operator*( float b, float4 a ) { return make_float4( b * a.x, b * a.y, b * a.z, b * a.w ); }
+inline float4 operator*( const float4& a, const float4& b ) { return make_float4( a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w ); }
+inline void operator*=( float4& a, const float4& b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z;	a.w *= b.w; }
+inline float4 operator*( const float4& a, float b ) { return make_float4( a.x * b, a.y * b, a.z * b, a.w * b ); }
+inline float4 operator*( float b, const float4& a ) { return make_float4( b * a.x, b * a.y, b * a.z, b * a.w ); }
 inline void operator*=( float4& a, float b ) { a.x *= b;	a.y *= b;	a.z *= b;	a.w *= b; }
-inline int4 operator*( int4 a, int4 b ) { return make_int4( a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w ); }
-inline void operator*=( int4& a, int4 b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z;	a.w *= b.w; }
-inline int4 operator*( int4 a, int b ) { return make_int4( a.x * b, a.y * b, a.z * b, a.w * b ); }
-inline int4 operator*( int b, int4 a ) { return make_int4( b * a.x, b * a.y, b * a.z, b * a.w ); }
+inline int4 operator*( const int4& a, const int4& b ) { return make_int4( a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w ); }
+inline void operator*=( int4& a, const int4& b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z;	a.w *= b.w; }
+inline int4 operator*( const int4& a, int b ) { return make_int4( a.x * b, a.y * b, a.z * b, a.w * b ); }
+inline int4 operator*( int b, const int4& a ) { return make_int4( b * a.x, b * a.y, b * a.z, b * a.w ); }
 inline void operator*=( int4& a, int b ) { a.x *= b;	a.y *= b;	a.z *= b;	a.w *= b; }
-inline uint4 operator*( uint4 a, uint4 b ) { return make_uint4( a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w ); }
-inline void operator*=( uint4& a, uint4 b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z;	a.w *= b.w; }
-inline uint4 operator*( uint4 a, uint b ) { return make_uint4( a.x * b, a.y * b, a.z * b, a.w * b ); }
-inline uint4 operator*( uint b, uint4 a ) { return make_uint4( b * a.x, b * a.y, b * a.z, b * a.w ); }
+inline uint4 operator*( const uint4& a, const uint4& b ) { return make_uint4( a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w ); }
+inline void operator*=( uint4& a, const uint4& b ) { a.x *= b.x;	a.y *= b.y;	a.z *= b.z;	a.w *= b.w; }
+inline uint4 operator*( const uint4& a, uint b ) { return make_uint4( a.x * b, a.y * b, a.z * b, a.w * b ); }
+inline uint4 operator*( uint b, const uint4& a ) { return make_uint4( b * a.x, b * a.y, b * a.z, b * a.w ); }
 inline void operator*=( uint4& a, uint b ) { a.x *= b;	a.y *= b;	a.z *= b;	a.w *= b; }
 
-inline float2 operator/( float2 a, float2 b ) { return make_float2( a.x / b.x, a.y / b.y ); }
-inline void operator/=( float2& a, float2 b ) { a.x /= b.x;	a.y /= b.y; }
-inline float2 operator/( float2 a, float b ) { return make_float2( a.x / b, a.y / b ); }
+inline float2 operator/( const float2& a, const float2& b ) { return make_float2( a.x / b.x, a.y / b.y ); }
+inline void operator/=( float2& a, const float2& b ) { a.x /= b.x;	a.y /= b.y; }
+inline float2 operator/( const float2& a, float b ) { return make_float2( a.x / b, a.y / b ); }
 inline void operator/=( float2& a, float b ) { a.x /= b;	a.y /= b; }
-inline float2 operator/( float b, float2 a ) { return make_float2( b / a.x, b / a.y ); }
-inline float3 operator/( float3 a, float3 b ) { return make_float3( a.x / b.x, a.y / b.y, a.z / b.z ); }
-inline void operator/=( float3& a, float3 b ) { a.x /= b.x;	a.y /= b.y;	a.z /= b.z; }
-inline float3 operator/( float3 a, float b ) { return make_float3( a.x / b, a.y / b, a.z / b ); }
+inline float2 operator/( float b, const float2& a ) { return make_float2( b / a.x, b / a.y ); }
+inline float3 operator/( const float3& a, const float3& b ) { return make_float3( a.x / b.x, a.y / b.y, a.z / b.z ); }
+inline void operator/=( float3& a, const float3& b ) { a.x /= b.x;	a.y /= b.y;	a.z /= b.z; }
+inline float3 operator/( const float3& a, float b ) { return make_float3( a.x / b, a.y / b, a.z / b ); }
 inline void operator/=( float3& a, float b ) { a.x /= b;	a.y /= b;	a.z /= b; }
-inline float3 operator/( float b, float3 a ) { return make_float3( b / a.x, b / a.y, b / a.z ); }
-inline float4 operator/( float4 a, float4 b ) { return make_float4( a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w ); }
-inline void operator/=( float4& a, float4 b ) { a.x /= b.x;	a.y /= b.y;	a.z /= b.z;	a.w /= b.w; }
-inline float4 operator/( float4 a, float b ) { return make_float4( a.x / b, a.y / b, a.z / b, a.w / b ); }
+inline float3 operator/( float b, const float3& a ) { return make_float3( b / a.x, b / a.y, b / a.z ); }
+inline float4 operator/( const float4& a, const float4& b ) { return make_float4( a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w ); }
+inline void operator/=( float4& a, const float4& b ) { a.x /= b.x;	a.y /= b.y;	a.z /= b.z;	a.w /= b.w; }
+inline float4 operator/( const float4& a, float b ) { return make_float4( a.x / b, a.y / b, a.z / b, a.w / b ); }
 inline void operator/=( float4& a, float b ) { a.x /= b;	a.y /= b;	a.z /= b;	a.w /= b; }
-inline float4 operator/( float b, float4 a ) { return make_float4( b / a.x, b / a.y, b / a.z, b / a.w ); }
+inline float4 operator/( float b, const float4& a ) { return make_float4( b / a.x, b / a.y, b / a.z, b / a.w ); }
 
-inline float2 fminf( float2 a, float2 b ) { return make_float2( fminf( a.x, b.x ), fminf( a.y, b.y ) ); }
-inline float3 fminf( float3 a, float3 b ) { return make_float3( fminf( a.x, b.x ), fminf( a.y, b.y ), fminf( a.z, b.z ) ); }
-inline float4 fminf( float4 a, float4 b ) { return make_float4( fminf( a.x, b.x ), fminf( a.y, b.y ), fminf( a.z, b.z ), fminf( a.w, b.w ) ); }
-inline int2 min( int2 a, int2 b ) { return make_int2( min( a.x, b.x ), min( a.y, b.y ) ); }
-inline int3 min( int3 a, int3 b ) { return make_int3( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ) ); }
-inline int4 min( int4 a, int4 b ) { return make_int4( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ), min( a.w, b.w ) ); }
-inline uint2 min( uint2 a, uint2 b ) { return make_uint2( min( a.x, b.x ), min( a.y, b.y ) ); }
-inline uint3 min( uint3 a, uint3 b ) { return make_uint3( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ) ); }
-inline uint4 min( uint4 a, uint4 b ) { return make_uint4( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ), min( a.w, b.w ) ); }
+inline float2 fminf( const float2& a, const float2& b ) { return make_float2( fminf( a.x, b.x ), fminf( a.y, b.y ) ); }
+inline float3 fminf( const float3& a, const float3& b ) { return make_float3( fminf( a.x, b.x ), fminf( a.y, b.y ), fminf( a.z, b.z ) ); }
+inline float4 fminf( const float4& a, const float4& b ) { return make_float4( fminf( a.x, b.x ), fminf( a.y, b.y ), fminf( a.z, b.z ), fminf( a.w, b.w ) ); }
+inline int2 min( const int2& a, const int2& b ) { return make_int2( min( a.x, b.x ), min( a.y, b.y ) ); }
+inline int3 min( const int3& a, const int3& b ) { return make_int3( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ) ); }
+inline int4 min( const int4& a, const int4& b ) { return make_int4( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ), min( a.w, b.w ) ); }
+inline uint2 min( const uint2& a, const uint2& b ) { return make_uint2( min( a.x, b.x ), min( a.y, b.y ) ); }
+inline uint3 min( const uint3& a, const uint3& b ) { return make_uint3( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ) ); }
+inline uint4 min( const uint4& a, const uint4& b ) { return make_uint4( min( a.x, b.x ), min( a.y, b.y ), min( a.z, b.z ), min( a.w, b.w ) ); }
 
-inline float2 fmaxf( float2 a, float2 b ) { return make_float2( fmaxf( a.x, b.x ), fmaxf( a.y, b.y ) ); }
-inline float3 fmaxf( float3 a, float3 b ) { return make_float3( fmaxf( a.x, b.x ), fmaxf( a.y, b.y ), fmaxf( a.z, b.z ) ); }
-inline float4 fmaxf( float4 a, float4 b ) { return make_float4( fmaxf( a.x, b.x ), fmaxf( a.y, b.y ), fmaxf( a.z, b.z ), fmaxf( a.w, b.w ) ); }
-inline int2 max( int2 a, int2 b ) { return make_int2( max( a.x, b.x ), max( a.y, b.y ) ); }
-inline int3 max( int3 a, int3 b ) { return make_int3( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ) ); }
-inline int4 max( int4 a, int4 b ) { return make_int4( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ), max( a.w, b.w ) ); }
-inline uint2 max( uint2 a, uint2 b ) { return make_uint2( max( a.x, b.x ), max( a.y, b.y ) ); }
-inline uint3 max( uint3 a, uint3 b ) { return make_uint3( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ) ); }
-inline uint4 max( uint4 a, uint4 b ) { return make_uint4( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ), max( a.w, b.w ) ); }
+inline float2 fmaxf( const float2& a, const float2& b ) { return make_float2( fmaxf( a.x, b.x ), fmaxf( a.y, b.y ) ); }
+inline float3 fmaxf( const float3& a, const float3& b ) { return make_float3( fmaxf( a.x, b.x ), fmaxf( a.y, b.y ), fmaxf( a.z, b.z ) ); }
+inline float4 fmaxf( const float4& a, const float4& b ) { return make_float4( fmaxf( a.x, b.x ), fmaxf( a.y, b.y ), fmaxf( a.z, b.z ), fmaxf( a.w, b.w ) ); }
+inline int2 max( const int2& a, const int2& b ) { return make_int2( max( a.x, b.x ), max( a.y, b.y ) ); }
+inline int3 max( const int3& a, const int3& b ) { return make_int3( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ) ); }
+inline int4 max( const int4& a, const int4& b ) { return make_int4( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ), max( a.w, b.w ) ); }
+inline uint2 max( const uint2& a, const uint2& b ) { return make_uint2( max( a.x, b.x ), max( a.y, b.y ) ); }
+inline uint3 max( const uint3& a, const uint3& b ) { return make_uint3( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ) ); }
+inline uint4 max( const uint4& a, const uint4& b ) { return make_uint4( max( a.x, b.x ), max( a.y, b.y ), max( a.z, b.z ), max( a.w, b.w ) ); }
 
 inline float lerp( float a, float b, float t ) { return a + t * (b - a); }
-inline float2 lerp( float2 a, float2 b, float t ) { return a + t * (b - a); }
-inline float3 lerp( float3 a, float3 b, float t ) { return a + t * (b - a); }
-inline float4 lerp( float4 a, float4 b, float t ) { return a + t * (b - a); }
+inline float2 lerp( const float2& a, const float2& b, float t ) { return a + t * (b - a); }
+inline float3 lerp( const float3& a, const float3& b, float t ) { return a + t * (b - a); }
+inline float4 lerp( const float4& a, const float4& b, float t ) { return a + t * (b - a); }
 
 inline float clamp( float f, float a, float b ) { return fmaxf( a, fminf( f, b ) ); }
 inline int clamp( int f, int a, int b ) { return max( a, min( f, b ) ); }
 inline uint clamp( uint f, uint a, uint b ) { return max( a, min( f, b ) ); }
-inline float2 clamp( float2 v, float a, float b ) { return make_float2( clamp( v.x, a, b ), clamp( v.y, a, b ) ); }
-inline float2 clamp( float2 v, float2 a, float2 b ) { return make_float2( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ) ); }
-inline float3 clamp( float3 v, float a, float b ) { return make_float3( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ) ); }
-inline float3 clamp( float3 v, float3 a, float3 b ) { return make_float3( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ) ); }
-inline float4 clamp( float4 v, float a, float b ) { return make_float4( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ), clamp( v.w, a, b ) ); }
-inline float4 clamp( float4 v, float4 a, float4 b ) { return make_float4( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ), clamp( v.w, a.w, b.w ) ); }
-inline int2 clamp( int2 v, int a, int b ) { return make_int2( clamp( v.x, a, b ), clamp( v.y, a, b ) ); }
-inline int2 clamp( int2 v, int2 a, int2 b ) { return make_int2( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ) ); }
-inline int3 clamp( int3 v, int a, int b ) { return make_int3( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ) ); }
-inline int3 clamp( int3 v, int3 a, int3 b ) { return make_int3( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ) ); }
-inline int4 clamp( int4 v, int a, int b ) { return make_int4( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ), clamp( v.w, a, b ) ); }
-inline int4 clamp( int4 v, int4 a, int4 b ) { return make_int4( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ), clamp( v.w, a.w, b.w ) ); }
-inline uint2 clamp( uint2 v, uint a, uint b ) { return make_uint2( clamp( v.x, a, b ), clamp( v.y, a, b ) ); }
-inline uint2 clamp( uint2 v, uint2 a, uint2 b ) { return make_uint2( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ) ); }
-inline uint3 clamp( uint3 v, uint a, uint b ) { return make_uint3( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ) ); }
-inline uint3 clamp( uint3 v, uint3 a, uint3 b ) { return make_uint3( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ) ); }
-inline uint4 clamp( uint4 v, uint a, uint b ) { return make_uint4( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ), clamp( v.w, a, b ) ); }
-inline uint4 clamp( uint4 v, uint4 a, uint4 b ) { return make_uint4( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ), clamp( v.w, a.w, b.w ) ); }
+inline float2 clamp( const float2& v, float a, float b ) { return make_float2( clamp( v.x, a, b ), clamp( v.y, a, b ) ); }
+inline float2 clamp( const float2& v, const float2& a, const float2& b ) { return make_float2( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ) ); }
+inline float3 clamp( const float3& v, float a, float b ) { return make_float3( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ) ); }
+inline float3 clamp( const float3& v, const float3& a, const float3& b ) { return make_float3( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ) ); }
+inline float4 clamp( const float4& v, float a, float b ) { return make_float4( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ), clamp( v.w, a, b ) ); }
+inline float4 clamp( const float4& v, const float4& a, const float4& b ) { return make_float4( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ), clamp( v.w, a.w, b.w ) ); }
+inline int2 clamp( const int2& v, int a, int b ) { return make_int2( clamp( v.x, a, b ), clamp( v.y, a, b ) ); }
+inline int2 clamp( const int2& v, const int2& a, const int2& b ) { return make_int2( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ) ); }
+inline int3 clamp( const int3& v, int a, int b ) { return make_int3( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ) ); }
+inline int3 clamp( const int3& v, const int3& a, const int3& b ) { return make_int3( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ) ); }
+inline int4 clamp( const int4& v, int a, int b ) { return make_int4( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ), clamp( v.w, a, b ) ); }
+inline int4 clamp( const int4& v, const int4& a, const int4& b ) { return make_int4( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ), clamp( v.w, a.w, b.w ) ); }
+inline uint2 clamp( const uint2& v, uint a, uint b ) { return make_uint2( clamp( v.x, a, b ), clamp( v.y, a, b ) ); }
+inline uint2 clamp( const uint2& v, const uint2& a, const uint2& b ) { return make_uint2( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ) ); }
+inline uint3 clamp( const uint3& v, uint a, uint b ) { return make_uint3( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ) ); }
+inline uint3 clamp( const uint3& v, const uint3& a, const uint3& b ) { return make_uint3( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ) ); }
+inline uint4 clamp( const uint4& v, uint a, uint b ) { return make_uint4( clamp( v.x, a, b ), clamp( v.y, a, b ), clamp( v.z, a, b ), clamp( v.w, a, b ) ); }
+inline uint4 clamp( const uint4& v, const uint4& a, const uint4& b ) { return make_uint4( clamp( v.x, a.x, b.x ), clamp( v.y, a.y, b.y ), clamp( v.z, a.z, b.z ), clamp( v.w, a.w, b.w ) ); }
 
-inline float dot( float2 a, float2 b ) { return a.x * b.x + a.y * b.y; }
-inline float dot( float3 a, float3 b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-inline float dot( float4 a, float4 b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
-inline int dot( int2 a, int2 b ) { return a.x * b.x + a.y * b.y; }
-inline int dot( int3 a, int3 b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-inline int dot( int4 a, int4 b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
-inline uint dot( uint2 a, uint2 b ) { return a.x * b.x + a.y * b.y; }
-inline uint dot( uint3 a, uint3 b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-inline uint dot( uint4 a, uint4 b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+inline float dot( const float2& a, const float2& b ) { return a.x * b.x + a.y * b.y; }
+inline float dot( const float3& a, const float3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline float dot( const float4& a, const float4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+inline int dot( const int2& a, const int2& b ) { return a.x * b.x + a.y * b.y; }
+inline int dot( const int3& a, const int3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline int dot( const int4& a, const int4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+inline uint dot( const uint2& a, const uint2& b ) { return a.x * b.x + a.y * b.y; }
+inline uint dot( const uint3& a, const uint3& b ) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline uint dot( const uint4& a, const uint4& b ) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
 
-inline float length( float2 v ) { return sqrtf( dot( v, v ) ); }
-inline float length( float3 v ) { return sqrtf( dot( v, v ) ); }
-inline float length( float4 v ) { return sqrtf( dot( v, v ) ); }
+inline float length( const float2& v ) { return sqrtf( dot( v, v ) ); }
+inline float length( const float3& v ) { return sqrtf( dot( v, v ) ); }
+inline float length( const float4& v ) { return sqrtf( dot( v, v ) ); }
 
-inline float length( int2 v ) { return sqrtf( (float)dot( v, v ) ); }
-inline float length( int3 v ) { return sqrtf( (float)dot( v, v ) ); }
-inline float length( int4 v ) { return sqrtf( (float)dot( v, v ) ); }
+inline float length( const int2& v ) { return sqrtf( (float)dot( v, v ) ); }
+inline float length( const int3& v ) { return sqrtf( (float)dot( v, v ) ); }
+inline float length( const int4& v ) { return sqrtf( (float)dot( v, v ) ); }
 
-inline float2 normalize( float2 v ) { float invLen = rsqrtf( dot( v, v ) );	return v * invLen; }
-inline float3 normalize( float3 v ) { float invLen = rsqrtf( dot( v, v ) );	return v * invLen; }
-inline float4 normalize( float4 v ) { float invLen = rsqrtf( dot( v, v ) );	return v * invLen; }
+inline float2 normalize( const float2& v ) { float invLen = rsqrtf( dot( v, v ) ); return v * invLen; }
+inline float3 normalize( const float3& v ) { float invLen = rsqrtf( dot( v, v ) ); return v * invLen; }
+inline float4 normalize( const float4& v ) { float invLen = rsqrtf( dot( v, v ) ); return v * invLen; }
 
-inline uint dominantAxis( float2 v ) { float x = fabs( v.x ), y = fabs( v.y ); return x > y ? 0 : 1; } // for coherent grid traversal
-inline uint dominantAxis( float3 v ) { float x = fabs( v.x ), y = fabs( v.y ), z = fabs( v.z ); float m = max( max( x, y ), z ); return m == x ? 0 : (m == y ? 1 : 2); }
+inline uint dominantAxis( const float2& v ) { float x = fabs( v.x ), y = fabs( v.y ); return x > y ? 0 : 1; } // for coherent grid traversal
+inline uint dominantAxis( const float3& v ) { float x = fabs( v.x ), y = fabs( v.y ), z = fabs( v.z ); float m = max( max( x, y ), z ); return m == x ? 0 : (m == y ? 1 : 2); }
 
-inline float2 floorf( float2 v ) { return make_float2( floorf( v.x ), floorf( v.y ) ); }
-inline float3 floorf( float3 v ) { return make_float3( floorf( v.x ), floorf( v.y ), floorf( v.z ) ); }
-inline float4 floorf( float4 v ) { return make_float4( floorf( v.x ), floorf( v.y ), floorf( v.z ), floorf( v.w ) ); }
+inline float2 floorf( const float2& v ) { return make_float2( floorf( v.x ), floorf( v.y ) ); }
+inline float3 floorf( const float3& v ) { return make_float3( floorf( v.x ), floorf( v.y ), floorf( v.z ) ); }
+inline float4 floorf( const float4& v ) { return make_float4( floorf( v.x ), floorf( v.y ), floorf( v.z ), floorf( v.w ) ); }
 
 inline float fracf( float v ) { return v - floorf( v ); }
-inline float2 fracf( float2 v ) { return make_float2( fracf( v.x ), fracf( v.y ) ); }
-inline float3 fracf( float3 v ) { return make_float3( fracf( v.x ), fracf( v.y ), fracf( v.z ) ); }
-inline float4 fracf( float4 v ) { return make_float4( fracf( v.x ), fracf( v.y ), fracf( v.z ), fracf( v.w ) ); }
+inline float2 fracf( const float2& v ) { return make_float2( fracf( v.x ), fracf( v.y ) ); }
+inline float3 fracf( const float3& v ) { return make_float3( fracf( v.x ), fracf( v.y ), fracf( v.z ) ); }
+inline float4 fracf( const float4& v ) { return make_float4( fracf( v.x ), fracf( v.y ), fracf( v.z ), fracf( v.w ) ); }
 
-inline float2 fmodf( float2 a, float2 b ) { return make_float2( fmodf( a.x, b.x ), fmodf( a.y, b.y ) ); }
-inline float3 fmodf( float3 a, float3 b ) { return make_float3( fmodf( a.x, b.x ), fmodf( a.y, b.y ), fmodf( a.z, b.z ) ); }
-inline float4 fmodf( float4 a, float4 b ) { return make_float4( fmodf( a.x, b.x ), fmodf( a.y, b.y ), fmodf( a.z, b.z ), fmodf( a.w, b.w ) ); }
+inline float2 fmodf( const float2& a, const float2& b ) { return make_float2( fmodf( a.x, b.x ), fmodf( a.y, b.y ) ); }
+inline float3 fmodf( const float3& a, const float3& b ) { return make_float3( fmodf( a.x, b.x ), fmodf( a.y, b.y ), fmodf( a.z, b.z ) ); }
+inline float4 fmodf( const float4& a, const float4& b ) { return make_float4( fmodf( a.x, b.x ), fmodf( a.y, b.y ), fmodf( a.z, b.z ), fmodf( a.w, b.w ) ); }
 
-inline float2 fabs( float2 v ) { return make_float2( fabs( v.x ), fabs( v.y ) ); }
-inline float3 fabs( float3 v ) { return make_float3( fabs( v.x ), fabs( v.y ), fabs( v.z ) ); }
-inline float4 fabs( float4 v ) { return make_float4( fabs( v.x ), fabs( v.y ), fabs( v.z ), fabs( v.w ) ); }
-inline int2 abs( int2 v ) { return make_int2( abs( v.x ), abs( v.y ) ); }
-inline int3 abs( int3 v ) { return make_int3( abs( v.x ), abs( v.y ), abs( v.z ) ); }
-inline int4 abs( int4 v ) { return make_int4( abs( v.x ), abs( v.y ), abs( v.z ), abs( v.w ) ); }
+inline float2 fabs( const float2& v ) { return make_float2( fabs( v.x ), fabs( v.y ) ); }
+inline float3 fabs( const float3& v ) { return make_float3( fabs( v.x ), fabs( v.y ), fabs( v.z ) ); }
+inline float4 fabs( const float4& v ) { return make_float4( fabs( v.x ), fabs( v.y ), fabs( v.z ), fabs( v.w ) ); }
+inline int2 abs( const int2& v ) { return make_int2( abs( v.x ), abs( v.y ) ); }
+inline int3 abs( const int3& v ) { return make_int3( abs( v.x ), abs( v.y ), abs( v.z ) ); }
+inline int4 abs( const int4& v ) { return make_int4( abs( v.x ), abs( v.y ), abs( v.z ), abs( v.w ) ); }
 
-inline float3 reflect( float3 i, float3 n ) { return i - 2.0f * n * dot( n, i ); }
+inline float3 reflect( const float3& i, const float3& n ) { return i - 2.0f * n * dot( n, i ); }
 
-inline float3 cross( float3 a, float3 b ) { return make_float3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x ); }
+inline float3 cross( const float3& a, const float3& b ) { return make_float3( a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x ); }
 
 inline float smoothstep( float a, float b, float x )
 {
@@ -1096,7 +1093,7 @@ private:
 	inline static cl_command_queue queue, queue2;
 	inline static char* log = 0;
 public:
-	inline static bool candoInterop = false;
+	inline static bool candoInterop = false, clStarted = false;
 };
 
 // global project settigs; shared with OpenCL

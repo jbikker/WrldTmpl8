@@ -13,11 +13,11 @@ void MeaningOfLife::Init()
 	// produce landscape
 	Surface s( "assets/heightmap.png" );
 	Surface c( "assets/colours.png" );
-	for( int x = 0; x < 1024; x++ ) for( int z = 0; z < 1024; z++ )
+	for (int x = 0; x < 1024; x++) for (int z = 0; z < 1024; z++)
 	{
 		int h = (s.buffer[x + z * 1024] & 255) + 2;
 		uint a = RGB32to16( c.buffer[x + z * 1024] );
-		for( int y = 0; y < h; y++ ) Plot( x, y, z, a );
+		for (int y = 0; y < h; y++) Plot( x, y, z, a );
 	}
 }
 
@@ -29,9 +29,9 @@ void MeaningOfLife::Tick( float deltaTime )
 	// from a distance
 	static float r = 0, camDist = 800;
 	float a = r * PI / 180;
-	float3 camPos = make_float3( 
-		camDist * (sinf( a ) + cosf( a )) + 512, 
-		250, 
+	float3 camPos = make_float3(
+		camDist * (sinf( a ) + cosf( a )) + 512,
+		250,
 		camDist * (cosf( a ) - sinf( a )) + 512
 	);
 	LookAt( camPos, make_float3( 512, 50, 512 ) );

@@ -197,7 +197,7 @@ void World::Clear()
 void World::Fill( const uint c )
 {
 	// fill the top-level grid and recycle all bricks
-	for( int y = 0; y < GRIDHEIGHT; y++ ) for( int z = 0; z < GRIDDEPTH; z++ ) for( int x = 0; x < GRIDWIDTH; x++ )
+	for (int y = 0; y < GRIDHEIGHT; y++) for (int z = 0; z < GRIDDEPTH; z++) for (int x = 0; x < GRIDWIDTH; x++)
 		grid[x + z * GRIDWIDTH + y * GRIDWIDTH * GRIDDEPTH] = c << 1;
 	memset( trash, 0, BRICKCOUNT * 4 );
 	for (uint i = 0; i < BRICKCOUNT; i++) trash[(i * 31 /* prevent false sharing*/) & (BRICKCOUNT - 1)] = i;
