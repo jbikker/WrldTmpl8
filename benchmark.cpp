@@ -10,6 +10,12 @@ uint sprite, frame = 0;
 // -----------------------------------------------------------
 void Benchmark::Init()
 {
+#if GIRAYS > 0
+	FatalError( "Disable GIRAYS and TAA for an accurate performance measurement." );
+#endif
+#if TAA > 0
+	FatalError( "Disable TAA and GIRAYS for an accurate performance measurement." );
+#endif
     ClearWorld();
 	uint colors[] = { RED, GREEN, BLUE, YELLOW, LIGHTRED, LIGHTBLUE, WHITE };
 	for( int i = 0; i < 500; i++ )
@@ -18,7 +24,7 @@ void Benchmark::Init()
 		int y = RandomUInt() % 800 + 100;
 		int z = RandomUInt() % 800 + 100;
 		int r = RandomUInt() % 20 + 20;
-		Sphere( x, y, z, r, colors[RandomUInt() % (sizeof( colors ) / 4)] );
+		Sphere( (float)x, (float)y, (float)z, (float)r, colors[RandomUInt() % (sizeof( colors ) / 4)] );
 	}
     LookAt( make_float3( 20, 20, 20 ), make_float3( 512, 512, 512 ) );
 }

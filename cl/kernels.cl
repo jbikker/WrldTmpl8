@@ -9,7 +9,11 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 	__global const unsigned int* grid,
 #endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
+	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uberGrid
+#endif
+)
 {
 	// basic AA
 	float3 pixel = (float3)(0);
@@ -19,7 +23,11 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 		// trace primary ray
 		float3 N;
 		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
+	#if THIRDLEVEL == 1
+		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */, uberGrid );
+	#else
 		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+	#endif
 		// simple hardcoded directional lighting using arbitrary unit vector
 		if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
 		const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
@@ -42,16 +50,24 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	__global const unsigned int* grid,
 #endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
+	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uberGrid
+#endif
+)
 {
 	// trace primary ray
 	float dist;
 	float3 N;
 	const float3 D = GenerateCameraRay( screenPos, params );
+#if THIRDLEVEL == 1
+	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */, uberGrid );
+#else
 	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+#endif
 	const float skyLightScale = params->skyLightScale;
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
-	if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ),1e20f);
+	if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
 	const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
 	float3 incoming = (float3)(0, 0, 0);
 	const int x = (int)screenPos.x, y = (int)screenPos.y;
@@ -64,7 +80,11 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 		const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
 		float3 N2;
 		float dist2;
+	#if THIRDLEVEL == 1
+		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12, uberGrid );
+	#else
 		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
+	#endif
 		if (0 /* for comparing against ground truth */) // get_global_id( 0 ) % SCRWIDTH < SCRWIDTH / 2)
 		{
 			if (voxel2 == 0) incoming += skyLightScale * SampleSky( (float3)(R.x, R.z, R.y), sky, params->skyWidth, params->skyHeight ); else /* secondary hit */
@@ -98,15 +118,27 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	__global const unsigned int* grid,
 #endif
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise )
+	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uberGrid
+#endif
+)
 {
 	// produce primary ray for pixel
 	const int x = get_global_id( 0 );
 	const int y = get_global_id( 1 );
 #if GIRAYS == 0
+#if THIRDLEVEL == 1
+	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
+#else
 	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+#endif
+#else
+#if THIRDLEVEL == 1
+	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
 #else
 	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+#endif
 #endif
 #if TAA == 1
 	// store pixel in linear color space for next frame
@@ -200,7 +232,11 @@ __kernel void traceBatch(
 	__read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3,
-	const int batchSize, __global const float4* rayData, __global uint* hitData )
+	const int batchSize, __global const float4* rayData, __global uint* hitData
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uberGrid
+#endif
+)
 {
 	// sanity check
 	const uint taskId = get_global_id( 0 );
@@ -211,11 +247,19 @@ __kernel void traceBatch(
 	// trace ray
 	float3 N;
 	float dist;
-	const uint voxel = TraceRay(
-		(float4)(O4.x, O4.y, O4.z, 1),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999
+#if THIRDLEVEL == 1
+	const uint voxel = TraceRay( 
+		(float4)(O4.x, O4.y, O4.z, 1), 
+		(float4)(D4.x, D4.y, D4.z, 1), 
+		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999, uberGrid
 	);
+#else
+	const uint voxel = TraceRay( 
+		(float4)(O4.x, O4.y, O4.z, 1), 
+		(float4)(D4.x, D4.y, D4.z, 1), 
+		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999 
+	);
+#endif
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
 	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
@@ -226,7 +270,11 @@ __kernel void traceBatchToVoid(
 	__read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
 	__global const unsigned char* brick2, __global const unsigned char* brick3,
-	const int batchSize, __global const float4* rayData, __global uint* hitData )
+	const int batchSize, __global const float4* rayData, __global uint* hitData
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uberGrid
+#endif
+)
 {
 	// sanity check
 	const uint taskId = get_global_id( 0 );
@@ -237,11 +285,19 @@ __kernel void traceBatchToVoid(
 	// trace ray
 	float3 N;
 	float dist;
+#if THIRDLEVEL == 1
+	TraceRayToVoid(
+		(float4)(O4.x, O4.y, O4.z, 1),
+		(float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, brick0, brick1, brick2, brick3, uberGrid
+	);
+#else
 	TraceRayToVoid(
 		(float4)(O4.x, O4.y, O4.z, 1),
 		(float4)(D4.x, D4.y, D4.z, 1),
 		&dist, &N, grid, brick0, brick1, brick2, brick3
 	);
+#endif
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
 	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
@@ -263,6 +319,33 @@ __kernel void commit( const int taskCount, __global uint* commit,
 		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) page[(offset & (CHUNKSIZE / 4 - 1)) + i] = src[i];
 	}
 }
+
+#if THIRDLEVEL == 1
+
+__kernel void updateUberGrid( const __global unsigned int* grid, __global unsigned char* uber )
+{
+	const int task = get_global_id( 0 );
+	const int x = task & (UBERWIDTH - 1);
+	const int z = (task / UBERWIDTH) & (UBERDEPTH - 1);
+	const int y = (task / (UBERWIDTH * UBERHEIGHT)) & (UBERHEIGHT - 1);
+	// check grid
+	bool empty = true;
+	for (int a = 0; a < 4; a++) for (int b = 0; b < 4; b++) for (int c = 0; c < 4; c++)
+	{
+		const int gx = x * 4 + a;
+		const int gy = y * 4 + b;
+		const int gz = z * 4 + c;
+		if (grid[gx + gz * GRIDWIDTH + gy * GRIDWIDTH * GRIDHEIGHT])
+		{
+			empty = false;
+			break;
+		}
+	}
+	// write result
+	uber[x + z * UBERWIDTH + y * UBERWIDTH * UBERHEIGHT] = empty ? 0 : 1;
+}
+
+#endif
 
 #if CELLSKIPPING == 1
 

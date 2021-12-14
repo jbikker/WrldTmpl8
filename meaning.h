@@ -1,7 +1,22 @@
 #pragma once
 
+#define CREATURECOUNT	512
+
 namespace Tmpl8
 {
+
+class ALIGN( 16 ) Creature
+{
+public:
+	Creature() = default;
+	Creature( const int i, const float3& p, const float3& t );
+	void Tick( const float deltaTime );
+	void Respawn();
+	float3 position, target;
+	float cycle, base;
+	int sprite, id;
+	static inline float jump = 2.5f; // object size: 48 bytes
+};
 
 class MeaningOfLife : public Game
 {

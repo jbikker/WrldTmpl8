@@ -99,6 +99,12 @@ World::World( const uint targetID )
 	hermitFinder = new Kernel( renderer->GetProgram(), "findHermits" );
 	hermitFinder->SetArgument( 0, &devmem );
 #endif
+#if THIRDLEVEL == 1
+	uberGrid = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_WRITE, UBERWIDTH * UBERHEIGHT * UBERDEPTH, 0, 0 );
+	uberGridUpdater = new Kernel( renderer->GetProgram(), "updateUberGrid" );
+	uberGridUpdater->SetArgument( 0, &devmem );
+	uberGridUpdater->SetArgument( 1, &uberGrid );
+#endif
 	targetTextureID = targetID;
 	committer->SetArgument( 1, &devmem );
 	committer->SetArgument( 2, brickBuffer[0] );
@@ -832,7 +838,7 @@ void World::EraseSprite( const uint idx )
 	// restore pixels occupied by sprite at previous location
 	auto& sprite = GetSpriteList();
 	const int3 lastPos = sprite[idx]->lastPos;
-	if (lastPos.x == -9999) return;
+	if (lastPos.x == OUTOFRANGE) return;
 	const SpriteFrame* backup = sprite[idx]->backup;
 	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
 	const uint* localPos = frame->drawPos;
@@ -851,18 +857,44 @@ void World::DrawSprite( const uint idx )
 	// draw sprite at new location
 	auto& sprite = GetSpriteList();
 	const int3& pos = sprite[idx]->currPos;
-	if (pos.x != -9999)
+	if (pos.x != OUTOFRANGE)
 	{
-		const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
-		SpriteFrame* backup = sprite[idx]->backup;
-		const uint* localPos = frame->drawPos;
-		const PAYLOAD* val = frame->drawVal;
-		for (uint i = 0; i < frame->drawListSize; i++)
+		mat4 M = sprite[idx]->transform;
+		if (M.cell[0] == 1 && M.cell[5] == 1 && M.cell[10] == 1)
 		{
-			const uint v = localPos[i];
-			const uint vx = v & 1023, vy = (v >> 10) & 1023, vz = (v >> 20) & 1023;
-			backup->buffer[i] = Get( vx + pos.x, vy + pos.y, vz + pos.z );
-			Set( vx + pos.x, vy + pos.y, vz + pos.z, val[i] );
+			// no rotation / scaling; use regular rendering code
+			const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
+			SpriteFrame* backup = sprite[idx]->backup;
+			const uint* localPos = frame->drawPos;
+			const PAYLOAD* val = frame->drawVal;
+			for (uint i = 0; i < frame->drawListSize; i++)
+			{
+				const uint v = localPos[i];
+				const uint vx = v & 1023, vy = (v >> 10) & 1023, vz = (v >> 20) & 1023;
+				backup->buffer[i] = Get( vx + pos.x, vy + pos.y, vz + pos.z );
+				Set( vx + pos.x, vy + pos.y, vz + pos.z, val[i] );
+			}
+		}
+		else
+		{
+			// draw sprite with specified transform
+			const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
+			float a = frame->size.x * 0.5f, b = frame->size.y * 0.5f, c = frame->size.z * 0.5f;
+			float3 p[8] = {
+				M.TransformVector( make_float3( -a, -b, -c ) ), M.TransformVector( make_float3( a, -b, -c ) ),
+				M.TransformVector( make_float3( a, b, -c ) ), M.TransformVector( make_float3( -a, b, -c ) ),
+				M.TransformVector( make_float3( -a, -b, c ) ), M.TransformVector( make_float3( a, -b, c ) ),
+				M.TransformVector( make_float3( a, b, c ) ), M.TransformVector( make_float3( -a, b, c ) )
+			};
+			aabb bounds;
+			for (int i = 0; i < 8; i++) bounds.Grow( p[i] );
+			int3 A = make_int3( bounds.bmin3 );
+			int3 B = make_int3( bounds.bmax3 );
+			mat4 iM = M.Inverted();
+			for (int z = A.z; z < B.z; z++) for (int y = A.y; y < B.y; y++) for (int x = A.x; x < B.x; x++)
+			{
+				// TODO
+			}
 		}
 	}
 	// store this location so we can remove the sprite later
@@ -921,17 +953,28 @@ void World::MoveSpriteTo( const uint idx, const uint x, const uint y, const uint
 	// out of bounds checks
 	auto& sprite = GetSpriteList();
 	if (idx >= sprite.size()) return;
-	// set new sprite location and frame
+	// set new sprite location
 	sprite[idx]->currPos = make_int3( x, y, z );
+}
+
+// World::TransformSprite
+// ----------------------------------------------------------------------------
+void World::TransformSprite( const uint idx, mat4 transform )
+{
+	// out of bounds checks
+	auto& sprite = GetSpriteList();
+	if (idx >= sprite.size()) return;
+	// set new sprite transform
+	sprite[idx]->transform = transform;
 }
 
 // World::RemoveSprite
 // ----------------------------------------------------------------------------
 void World::RemoveSprite( const uint idx )
 {
-	// move sprite to -9999 to keep it from taking CPU cycles
+	// move sprite to OUTOFRANGE (-99999) to keep it from taking CPU cycles
 	auto& sprite = GetSpriteList();
-	sprite[idx]->currPos.x = -9999;
+	sprite[idx]->currPos.x = OUTOFRANGE;
 }
 
 // World::StampSpriteTo
@@ -943,7 +986,7 @@ void World::StampSpriteTo( const uint idx, const uint x, const uint y, const uin
 	if (idx >= sprite.size()) return;
 	// stamp sprite frame to specified location
 	const int3& pos = make_int3( x, y, z );
-	if (pos.x == -9999) return;
+	if (pos.x == OUTOFRANGE) return;
 	const SpriteFrame* frame = sprite[idx]->frame[sprite[idx]->currFrame];
 	const uint* localPos = frame->drawPos;
 	const PAYLOAD* val = frame->drawVal;
@@ -972,7 +1015,7 @@ bool World::SpriteHit( const uint A, const uint B )
 	// get the bounding boxes for the two sprites
 	auto& sprite = GetSpriteList();
 	int3 b1A = sprite[A]->currPos, b1B = sprite[B]->currPos;
-	if (b1A.x == -9999 || b1B.x == -9999) return false; // early out: at least one is inactive
+	if (b1A.x == OUTOFRANGE || b1B.x == OUTOFRANGE) return false; // early out: at least one is inactive
 	SpriteFrame* frameA = sprite[A]->frame[sprite[A]->currFrame];
 	SpriteFrame* frameB = sprite[B]->frame[sprite[B]->currFrame];
 	int3 b2A = b1A + frameA->size, b2B = b1B + frameB->size;
@@ -1018,7 +1061,7 @@ void World::SetParticle( const uint set, const uint idx, const uint3 pos, const 
 void World::DrawParticles( const uint set )
 {
 	auto& particles = GetParticlesList();
-	if (particles[set]->count == 0 || particles[set]->voxel[0].x == -9999) return; // inactive
+	if (particles[set]->count == 0 || particles[set]->voxel[0].x == OUTOFRANGE) return; // inactive
 	for (uint s = particles[set]->count, i = 0; i < s; i++)
 	{
 		const uint4 v = particles[set]->voxel[i];
@@ -1269,6 +1312,10 @@ Ray* World::GetBatchBuffer()
 		batchTracer->SetArgument( 7, rayBatchResult );
 		batchToVoidTracer->SetArgument( 6, rayBatchBuffer );
 		batchToVoidTracer->SetArgument( 7, rayBatchResult );
+	#if THIRDLEVEL == 1
+		batchTracer->SetArgument( 8, &uberGrid );
+		batchToVoidTracer->SetArgument( 8, &uberGrid );
+	#endif
 	}
 	return (Ray*)rayBatchBuffer->hostBuffer;
 }
@@ -1414,6 +1461,9 @@ void World::Render()
 			renderer->SetArgument( 7, brickBuffer[3] );
 			renderer->SetArgument( 8, sky );
 			renderer->SetArgument( 9, blueNoise );
+		#if THIRDLEVEL
+			renderer->SetArgument( 10, &uberGrid );
+		#endif
 		}
 		static int histIn = 0, histOut = 1;
 	#if TAA == 0
@@ -1503,6 +1553,19 @@ void World::Commit()
 		printf( "hermits detected in %5.2fms\n", duration / 1000000000.0f );
 	#endif
 	#endif
+	#if THIRDLEVEL == 1
+		const size_t ws = UBERWIDTH * UBERHEIGHT * UBERDEPTH;
+		const size_t ls = 16;
+		clEnqueueNDRangeKernel( Kernel::GetQueue2(), uberGridUpdater->GetKernel(), 1, 0, &ws, &ls, 0, 0, &ubergridDone );
+	#if 1
+		clWaitForEvents( 1, &ubergridDone );
+		cl_ulong uberStart = 0, uberEnd = 0;
+		clGetEventProfilingInfo( ubergridDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &uberStart, 0 );
+		clGetEventProfilingInfo( ubergridDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &uberEnd, 0 );
+		unsigned long duration = (unsigned long)(uberEnd - uberStart); // in nanoseconds
+		printf( "ubergrid constructed in %10.7fms\n", duration / 1000000.0f );
+	#endif
+	#endif
 	#if GRID_IN_3DIMAGE == 1
 		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
 		size_t origin[3] = { 0, 0, 0 };
@@ -1525,8 +1588,6 @@ void World::Commit()
 	// at this point, rendering *must* be done; let's make sure
 	if (Game::autoRendering)
 	{
-		cl_int renderStatus;
-		clGetEventInfo( renderDone, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof( cl_int ), &renderStatus, 0 );
 		clWaitForEvents( 1, &renderDone );
 		// profiling: https://stackoverflow.com/questions/23272170/opencl-measure-kernels-time
 		cl_ulong renderStart = 0;

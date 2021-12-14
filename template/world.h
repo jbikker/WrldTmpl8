@@ -5,6 +5,8 @@
 #define TILESIZE	8
 #define TILESIZE2	(TILESIZE * TILESIZE)
 
+#define OUTOFRANGE -99999
+
 namespace Tmpl8
 {
 
@@ -40,9 +42,10 @@ class Sprite
 {
 public:
 	vector<SpriteFrame*> frame;			// sprite frames
-	SpriteFrame* backup;				// backup of pixels that the sprite overwrote
-	int3 lastPos = make_int3( -9999 );	// location where the backup will be restored to
-	int3 currPos = make_int3( -9999 );	// location where the sprite will be drawn
+	SpriteFrame* backup = 0;			// backup of pixels that the sprite overwrote
+	int3 lastPos = make_int3( OUTOFRANGE );	// location where the backup will be restored to
+	int3 currPos = make_int3( OUTOFRANGE );	// location where the sprite will be drawn
+	mat4 transform = mat4::Identity();	// only 3x3 part is used; scale + rotation
 	int currFrame = 0;					// frame to draw
 	bool hasShadow = false;				// set to true to enable a drop shadow
 	uint4* preShadow = 0;				// room for backup of voxels overwritten by shadow
@@ -76,7 +79,7 @@ public:
 		count = N, voxel = new uint4[N], backup = new uint4[N];
 		memset( voxel, 0, N * sizeof( uint4 ) );
 		memset( backup, 0, N * sizeof( uint4 ) );
-		voxel[0].x = -9999; // inactive by default
+		voxel[0].x = OUTOFRANGE;		// inactive by default
 	}
 	uint4* voxel = 0;					// particle positions & color
 	uint4* backup = 0;					// backup of voxels overlapped by particles
@@ -189,6 +192,7 @@ public:
 	uint CreateSprite( const int3 pos, const int3 size, const int frames );
 	uint SpriteFrameCount( const uint idx );
 	void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z );
+	void TransformSprite( const uint idx, mat4 transform );
 	void RemoveSprite( const uint idx );
 	void StampSpriteTo( const uint idx, const uint x, const uint y, const uint z );
 	void SetSpriteFrame( const uint idx, const uint frame );
@@ -424,6 +428,11 @@ private:
 #if CELLSKIPPING == 1
 	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
 	cl_event hermitDone;				// for profiling
+#endif
+#if THIRDLEVEL == 1
+	cl_mem uberGrid = 0;				// 32x32x32 top-level grid (device-side only)
+	Kernel* uberGridUpdater;			// build a 32x32x32 top-level grid over the brickmap
+	cl_event ubergridDone;				// for profiling
 #endif
 	cl_event copyDone, commitDone;		// events for queue synchronization
 	cl_event renderDone;				// event used for profiling

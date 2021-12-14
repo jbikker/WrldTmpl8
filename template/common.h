@@ -1,6 +1,6 @@
 // default screen resolution
-#define SCRWIDTH	1280
-#define SCRHEIGHT	720
+#define SCRWIDTH	1600
+#define SCRHEIGHT	1024
 
 // IMPORTANT NOTE ON OPENCL COMPATIBILITY ON OLDER LAPTOPS:
 // Without a GPU, a laptop needs at least a 'Broadwell' Intel CPU (5th gen, 2015):
@@ -32,16 +32,16 @@
 #endif
 
 // renderer performance setting: set to 0 for slower devices, up to 8 for fast GPUs
-#define GIRAYS		6
+#define GIRAYS		0
 
 // Panini projection, http://tksharpless.net/vedutismo/Pannini/panini.pdf via https://www.shadertoy.com/view/Wt3fzB
 #define PANINI		0	// 0 to disable, 1 to enable
 
 // TAA, as in https://www.shadertoy.com/view/3sfBWs
-#define TAA			1	// 0 to disable, 1 to enable
+#define TAA			0	// 0 to disable, 1 to enable
 
 // MSAA
-#define AA_SAMPLES	1	// 1 to disable, 2..4 to enable. Note: will be squared.
+#define AA_SAMPLES	3	// 1 to disable, 2..4 to enable. Note: will be squared.
 
 // some useful color names
 #ifdef VOXEL8
@@ -99,6 +99,9 @@ struct RenderParams
 #define GRIDDEPTH	(MAPDEPTH / BRICKDIM)
 #define GRIDSIZE	(GRIDWIDTH * GRIDHEIGHT * GRIDWIDTH)
 #define BRICKSIZE	(BRICKDIM * BRICKDIM * BRICKDIM)
+#define UBERWIDTH	(GRIDWIDTH / 4)
+#define UBERHEIGHT	(GRIDHEIGHT / 4)
+#define UBERDEPTH	(GRIDDEPTH / 4)
 // note: we reserve 50% of the theoretical peak; a normal scene shouldn't come close to
 // using that many unique (non-empty!) bricks.
 #define BRICKCOUNT	((((MAPWIDTH / BRICKDIM) * (MAPHEIGHT / BRICKDIM) * (MAPDEPTH / BRICKDIM))) / 2)
@@ -109,6 +112,7 @@ struct RenderParams
 // experimental
 #define GRID_IN_3DIMAGE	1 // slightly faster
 #define CELLSKIPPING	0 // take larger steps when possible
+#define THIRDLEVEL		1 // three-level grid traversal
 
 // constants
 #define PI			3.14159265358979323846264f

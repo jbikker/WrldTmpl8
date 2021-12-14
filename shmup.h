@@ -14,7 +14,7 @@ class Actor
 {
 public:
 	virtual bool Tick( int worldPos ) = 0;
-	int3 relPos = make_int3( -9999, 0, 0 );
+	int3 relPos = make_int3( OUTOFRANGE, 0, 0 );
 	inline static SHMUP* game = 0; // for global access to game data
 	int sprite = -1;
 	bool isFriendly = false;
@@ -165,7 +165,7 @@ private:
 	int3 cameraPos = make_int3( 462 << 8, 70 << 8, 512 << 8 );
 	int3 relPos = make_int3( 0 );
 	int gunDelay = 0, gun = 0, laserPtr = 0;
-	float3 option1Pos = make_float3( -9999 ), option2Pos;
+	float3 option1Pos = make_float3( OUTOFRANGE ), option2Pos;
 	float optionAngle = 0, optionRadius;
 	Surface* landscape = 0;
 	int landBlock = 0;

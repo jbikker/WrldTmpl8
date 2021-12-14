@@ -13,9 +13,9 @@ ISoundSource* alarm = 0, * charge = 0;
 
 bool Laser::Tick( int worldPos )
 {
-	if (relPos.x == -9999) return true; // beam is inactive
+	if (relPos.x == OUTOFRANGE) return true; // beam is inactive
 	MoveSpriteTo( sprite, SHMUP::Corrected( relPos ) );
-	if ((relPos.x += 10) > 1024) relPos.x = -9999;
+	if ((relPos.x += 10) > 1024) relPos.x = OUTOFRANGE;
 	return true;
 }
 

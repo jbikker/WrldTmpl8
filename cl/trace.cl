@@ -12,6 +12,7 @@
 #define BPMY		(MAPHEIGHT - BRICKDIM)
 #define BPMZ		(MAPDEPTH - BRICKDIM)
 #define TOPMASK3	(((1023 - BMSK) << 20) + ((1023 - BMSK) << 10) + (1023 - BMSK))
+#define UBERMASK3	((1020 << 20) + (1020 << 10) + 1020)
 
 // fix ray directions that are too close to 0
 float4 FixZeroDeltas( float4 V )
@@ -26,7 +27,11 @@ float4 FixZeroDeltas( float4 V )
 // version A: optimized port of CPU code; rays step through top grid or brick with separate code.
 uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps )
+	__global const unsigned char* brick2, __global const unsigned char* brick3, int steps
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uberGrid
+#endif
+)
 {
 	__global const unsigned char* bricks[4] = { brick0, brick1, brick2, brick3 };
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);
@@ -46,13 +51,91 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		A += tmin * V; // new ray entry point
 		to = tmin;
 		// update 'last', for correct handling of hits on the border of the map
-		if (A.y < 0.01f || A.y > (MAPHEIGHT - 1.01f)) last = 1;
-		if (A.z < 0.01f || A.z > (MAPDEPTH - 1.01f)) last = 2;
+		if (A.y < 0.01f || A.y >( MAPHEIGHT - 1.01f )) last = 1;
+		if (A.z < 0.01f || A.z >( MAPDEPTH - 1.01f )) last = 2;
 	}
-	uint tp = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) + (clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
+#if THIRDLEVEL == 1
+	uint up = (clamp( (uint)A.x >> 5, 0u, 31u ) << 20) + (clamp( (uint)A.y >> 5, 0u, 31u ) << 10) +
+		clamp( (uint)A.z >> 5, 0u, 31u );
+	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
+	float4 tm = ((float4)((up >> 20) + ((bits >> 5) & 1), ((up >> 10) & 31) + ((bits >> 13) & 1),
+		(up & 31) + ((bits >> 21) & 1), 0) - A * 0.03125f) * rV;
+	float t = 0;
+	const float4 td = (float4)(DIR_X, DIR_Y, DIR_Z, 0) * rV;
+	do
+	{
+		// fetch bit from ubergrid
+		uint o = uberGrid[(up >> 20) + ((up & 31) << 5) + (((up >> 10) & 31) << 10)];
+		if ((steps -= 4) <= 0) break;
+		if (o)
+		{
+			// backup ubergrid traversal state
+			const float4 tm_ = tm;
+			// intialize topgrid traversal
+			tm = A + V * (t *= 4) * 8; // abusing tm for I to save registers
+			uint tp = (clamp( (uint)tm.x >> 3, up >> 18, (up >> 18) + 3 ) << 20) + 
+				(clamp( (uint)tm.y >> 3, (up >> 8) & 1023, ((up >> 8) & 1023) + 3 ) << 10) +
+				clamp( (uint)tm.z >> 3, (up << 2) & 1023, ((up << 2) & 1023) + 3 ), tq = tp & UBERMASK3;
+			tm = ((float4)((tp >> 20) + ((bits >> 5) & 1), ((tp >> 10) & 127) + ((bits >> 13) & 1),
+				(tp & 127) + ((bits >> 21) & 1), 0) - A * 0.125f) * rV;
+			do
+			{
+				// fetch brick from top grid
+				o = read_imageui( grid, (int4)(tp >> 20, tp & 127, (tp >> 10) & 127, 0) ).x;
+				if (!--steps) break;
+				if (o != 0) if ((o & 1) == 0) /* solid */
+				{
+					*dist = (t + to) * 8.0f, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+					return o >> 1;
+				}
+				else // brick
+				{
+					// backup top-grid traversal state
+					const float4 tm_ = tm;
+					// intialize brick traversal
+					tm = A + V * (t *= 8); // abusing tm for I to save registers
+					uint p = (clamp( (uint)tm.x, tp >> 17, (tp >> 17) + 7 ) << 20) +
+						(clamp( (uint)tm.y, (tp >> 7) & 1023, ((tp >> 7) & 1023) + 7 ) << 10) +
+						clamp( (uint)tm.z, (tp << 3) & 1023, ((tp << 3) & 1023) + 7 ), lp = ~1;
+					tm = ((float4)((p >> 20) + OFFS_X, ((p >> 10) & 1023) + OFFS_Y, (p & 1023) + OFFS_Z, 0) - A) * rV;
+					p &= 7 + (7 << 10) + (7 << 20), o = (o >> 1) * BRICKSIZE;
+					__global const PAYLOAD* page;
+					do // traverse brick
+					{
+						uint v = o + (p >> 20) + ((p >> 7) & (BMSK * BRICKDIM)) + (p & BMSK) * BDIM2;
+						if (p != lp) page = (__global const PAYLOAD*)bricks[v / (CHUNKSIZE / PAYLOADSIZE)], lp = p;
+						v = page[v & ((CHUNKSIZE / PAYLOADSIZE) - 1)];
+						if (v)
+						{
+							*dist = t + to, * N = -(float3)((last == 0) * DIR_X, (last == 1) * DIR_Y, (last == 2) * DIR_Z);
+							return v;
+						}
+						t = min( tm.x, min( tm.y, tm.z ) );
+						if (t == tm.x) tm.x += td.x, p += DIR_X << 20, last = 0;
+						else if (t == tm.y) tm.y += td.y, p += ((bits << 2) & 3072) - 1024, last = 1;
+						else if (t == tm.z) tm.z += td.z, p += DIR_Z, last = 2;
+					} while (!(p & TOPMASK3));
+					tm = tm_; // restore top-grid traversal state
+				}
+				t = min( tm.x, min( tm.y, tm.z ) );
+				if (t == tm.x) tm.x += td.x, tp += DIR_X << 20, last = 0;
+				else if (t == tm.y) tm.y += td.y, tp += DIR_Y << 10, last = 1;
+				else if (t == tm.z) tm.z += td.z, tp += DIR_Z, last = 2;
+			} while ((tp & UBERMASK3) == tq);
+			// restore ubergrid traversal state
+			tm = tm_;
+		}
+		t = min( tm.x, min( tm.y, tm.z ) );
+		if (t == tm.x) tm.x += td.x, up += DIR_X << 20, last = 0;
+		else if (t == tm.y) tm.y += td.y, up += DIR_Y << 10, last = 1;
+		else if (t == tm.z) tm.z += td.z, up += DIR_Z, last = 2;
+	} while (!(up & 0xfe0f83e0));
+#else
+	uint tp = (clamp( (uint)A.x >> 3, 0u, 127u ) << 20) +
+		(clamp( (uint)A.y >> 3, 0u, 127u ) << 10) +
 		clamp( (uint)A.z >> 3, 0u, 127u );
 	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
-	float4 tm = ((float4)(((tp >> 20) & 127) + ((bits >> 5) & 1), ((tp >> 10) & 127) + ((bits >> 13) & 1),
+	float4 tm = ((float4)((tp >> 20) + ((bits >> 5) & 1), ((tp >> 10) & 127) + ((bits >> 13) & 1),
 		(tp & 127) + ((bits >> 21) & 1), 0) - A * 0.125f) * rV;
 	float t = 0;
 	const float4 td = (float4)(DIR_X, DIR_Y, DIR_Z, 0) * rV;
@@ -100,12 +183,17 @@ uint TraceRay( float4 A, const float4 B, float* dist, float3* N, __read_only ima
 		else if (t == tm.y) tm.y += td.y, tp += DIR_Y << 10, last = 1;
 		else if (t == tm.z) tm.z += td.z, tp += DIR_Z, last = 2;
 	} while (!(tp & 0xf80e0380));
+#endif
 	return 0U;
 }
 
 void TraceRayToVoid( float4 A, const float4 B, float* dist, float3* N, __read_only image3d_t grid,
 	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3 )
+	__global const unsigned char* brick2, __global const unsigned char* brick3
+#if THIRDLEVEL == 1
+	, __global const unsigned char* uber
+#endif
+)
 {
 	__global const unsigned char* bricks[4] = { brick0, brick1, brick2, brick3 };
 	const float4 V = FixZeroDeltas( B ), rV = (float4)(1.0 / V.x, 1.0 / V.y, 1.0 / V.z, 1);

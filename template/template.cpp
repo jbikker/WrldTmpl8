@@ -161,6 +161,9 @@ bool SpriteHit( const uint A, const uint B ) { return world->SpriteHit( A, B ); 
 void MoveSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->MoveSpriteTo( idx, x, y, z ); }
 void MoveSpriteTo( const uint idx, const int3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
 void MoveSpriteTo( const uint idx, const uint3 pos ) { world->MoveSpriteTo( idx, pos.x, pos.y, pos.z ); }
+void RotateSprite( const uint idx, float angle ) { mat4 M = mat4::RotateY( angle * PI / 180 ); world->TransformSprite( idx, M ); }
+void ScaleSprite( const uint idx, float scale ) { mat4 M = mat4::Scale( scale ); world->TransformSprite( idx, M ); }
+void TransformSprite( const uint idx, mat4 transform ) { world->TransformSprite( idx, transform ); }
 void RemoveSprite( const uint idx ) { world->RemoveSprite( idx ); }
 void StampSpriteTo( const uint idx, const uint x, const uint y, const uint z ) { world->StampSpriteTo( idx, x, y, z ); }
 void StampSpriteTo( const uint idx, const int3 pos ) { world->StampSpriteTo( idx, pos.x, pos.y, pos.z ); }
