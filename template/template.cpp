@@ -1271,9 +1271,31 @@ Kernel::Kernel( char* file, char* entryPoint )
 	cl_int error;
 	program = clCreateProgramWithSource( context, 1, (const char**)&source, &size, &error );
 	CHECKCL( error );
-	error = clBuildProgram( program, 0, NULL, "-cl-fast-relaxed-math -cl-mad-enable -cl-denorms-are-zero -cl-no-signed-zeros -cl-unsafe-math-optimizations", NULL, NULL );
+	// why does the nvidia compiler not support these:
+	// -cl-nv-maxrregcount=64 not faster than leaving it out (same for 128)
+	// -cl-no-subgroup-ifp ? fails on nvidia.
+	error = clBuildProgram( program, 0, NULL, "-cl-nv-verbose -cl-fast-relaxed-math -cl-mad-enable -cl-single-precision-constant", NULL, NULL );
 	// handle errors
-	if (error != CL_SUCCESS)
+	if (error == CL_SUCCESS)
+	{
+		// dump PTX via: https://forums.developer.nvidia.com/t/pre-compiling-opencl-kernels-tutorial/17089
+		// and: https://stackoverflow.com/questions/12868889/clgetprograminfo-cl-program-binary-sizes-incorrect-results
+		cl_uint devCount;
+		CHECKCL( clGetProgramInfo( program, CL_PROGRAM_NUM_DEVICES, sizeof( cl_uint ), &devCount, NULL ) );
+		size_t* size = new size_t[devCount];
+		size[0] = 0;
+		size_t received;
+		CHECKCL( clGetProgramInfo( program, CL_PROGRAM_BINARY_SIZES /* wrong data... */, devCount * sizeof( size_t ), size, &received ) );
+		char** binaries = new char* [devCount];
+		for (uint i = 0; i < devCount; i++)
+			binaries[i] = new char[size[i] + 1];
+		CHECKCL( clGetProgramInfo( program, CL_PROGRAM_BINARIES, devCount * sizeof( size_t ), binaries, NULL ) );
+		FILE* f = fopen( "buildlog.txt", "wb" );
+		for (uint i = 0; i < devCount; i++)
+			fwrite( binaries[i], 1, size[i] + 1, f );
+		fclose( f );
+	}
+	else
 	{
 		// obtain the error log from the cl compiler
 		if (!log) log = new char[256 * 1024]; // can be quite large
@@ -1840,7 +1862,7 @@ int gladLoadGL( void ) {
 	{
 		status = gladLoadGLLoader( &get_proc );
 		close_gl();
-	}
+}
 
 	return status;
 }

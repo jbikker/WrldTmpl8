@@ -64,11 +64,17 @@ World::World( const uint targetID )
 #endif
 	// create brick storage
 	brick = (PAYLOAD*)_aligned_malloc( CHUNKCOUNT * CHUNKSIZE, 64 );
+#if ONEBRICKBUFFER == 1
+	brickBuffer = new Buffer( CHUNKSIZE * CHUNKCOUNT / 4 /* dwords */, Buffer::DEFAULT, (uchar*)brick );
+	brickBuffer->CopyToDevice();
+#else
+	brick = (PAYLOAD*)_aligned_malloc( CHUNKCOUNT * CHUNKSIZE, 64 );
 	for (int i = 0; i < CHUNKCOUNT; i++)
 	{
 		brickBuffer[i] = new Buffer( CHUNKSIZE / 4 /* dwords */, Buffer::DEFAULT, (uchar*)brick + CHUNKSIZE * i );
 		brickBuffer[i]->CopyToDevice();
 	}
+#endif
 	brickInfo = (BrickInfo*)_aligned_malloc( BRICKCOUNT * sizeof( BrickInfo ), 64 );
 	// create a cyclic array for unused bricks (all of them, for now)
 	trash = (uint*)_aligned_malloc( BRICKCOUNT * 4, 64 );
@@ -95,32 +101,54 @@ World::World( const uint targetID )
 	committer = new Kernel( renderer->GetProgram(), "commit" );
 	batchTracer = new Kernel( renderer->GetProgram(), "traceBatch" );
 	batchToVoidTracer = new Kernel( renderer->GetProgram(), "traceBatchToVoid" );
+#if MORTONBRICKS == 1
+	encodeBricks = new Kernel( renderer->GetProgram(), "encodeBricks" );
+#endif
 #if CELLSKIPPING == 1
 	hermitFinder = new Kernel( renderer->GetProgram(), "findHermits" );
 	hermitFinder->SetArgument( 0, &devmem );
 #endif
-#if THIRDLEVEL == 1
 	uberGrid = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_WRITE, UBERWIDTH * UBERHEIGHT * UBERDEPTH, 0, 0 );
 	uberGridUpdater = new Kernel( renderer->GetProgram(), "updateUberGrid" );
 	uberGridUpdater->SetArgument( 0, &devmem );
 	uberGridUpdater->SetArgument( 1, &uberGrid );
-#endif
 	targetTextureID = targetID;
 	committer->SetArgument( 1, &devmem );
+#if ONEBRICKBUFFER == 1
+	committer->SetArgument( 2, brickBuffer );
+	committer->SetArgument( 3, brickBuffer );
+	committer->SetArgument( 4, brickBuffer );
+	committer->SetArgument( 5, brickBuffer );
+#else
 	committer->SetArgument( 2, brickBuffer[0] );
 	committer->SetArgument( 3, brickBuffer[1] );
 	committer->SetArgument( 4, brickBuffer[2] );
 	committer->SetArgument( 5, brickBuffer[3] );
+#endif
 	batchTracer->SetArgument( 0, &gridMap );
+#if ONEBRICKBUFFER == 1
+	batchTracer->SetArgument( 1, brickBuffer );
+	batchTracer->SetArgument( 2, brickBuffer );
+	batchTracer->SetArgument( 3, brickBuffer );
+	batchTracer->SetArgument( 4, brickBuffer );
+#else
 	batchTracer->SetArgument( 1, brickBuffer[0] );
 	batchTracer->SetArgument( 2, brickBuffer[1] );
 	batchTracer->SetArgument( 3, brickBuffer[2] );
 	batchTracer->SetArgument( 4, brickBuffer[3] );
+#endif
 	batchToVoidTracer->SetArgument( 0, &gridMap );
+#if ONEBRICKBUFFER == 1
+	batchToVoidTracer->SetArgument( 1, brickBuffer );
+	batchToVoidTracer->SetArgument( 2, brickBuffer );
+	batchToVoidTracer->SetArgument( 3, brickBuffer );
+	batchToVoidTracer->SetArgument( 4, brickBuffer );
+#else
 	batchToVoidTracer->SetArgument( 1, brickBuffer[0] );
 	batchToVoidTracer->SetArgument( 2, brickBuffer[1] );
 	batchToVoidTracer->SetArgument( 3, brickBuffer[2] );
 	batchToVoidTracer->SetArgument( 4, brickBuffer[3] );
+#endif
 	// prepare the bluenoise data
 	const uchar* data8 = (const uchar*)sob256_64; // tables are 8 bit per entry
 	uint* data32 = new uint[65536 * 5]; // we want a full uint per entry
@@ -145,7 +173,11 @@ World::~World()
 	delete renderer;
 	_aligned_free( gridOrig ); // grid itself gets changed after allocation
 	_aligned_free( brick );
+#if ONEBRICKBUFFER == 1
+	delete brickBuffer;
+#else
 	for (int i = 0; i < 4; i++) delete brickBuffer[i];
+#endif
 	_aligned_free( brickInfo );
 	_aligned_free( trash );
 	delete screen;
@@ -160,7 +192,16 @@ World::~World()
 // ----------------------------------------------------------------------------
 void World::ForceSyncAllBricks()
 {
+#if ONEBRICKBUFFER == 1
+	brickBuffer->CopyToDevice();
+#if MORTONBRICKS == 1
+	encodeBricks->SetArgument( 0, BRICKCOUNT );
+	encodeBricks->SetArgument( 1, brickBuffer );
+	encodeBricks->Run( BRICKCOUNT );
+#endif
+#else
 	for (int i = 0; i < CHUNKCOUNT; i++) brickBuffer[i]->CopyToDevice();
+#endif
 }
 
 // World::DummyWorld: box
@@ -1310,12 +1351,10 @@ Ray* World::GetBatchBuffer()
 		// now that we have the buffers, we can pass them to the kernel (just once)
 		batchTracer->SetArgument( 6, rayBatchBuffer );
 		batchTracer->SetArgument( 7, rayBatchResult );
+		batchTracer->SetArgument( 8, &uberGrid );
 		batchToVoidTracer->SetArgument( 6, rayBatchBuffer );
 		batchToVoidTracer->SetArgument( 7, rayBatchResult );
-	#if THIRDLEVEL == 1
-		batchTracer->SetArgument( 8, &uberGrid );
 		batchToVoidTracer->SetArgument( 8, &uberGrid );
-	#endif
 	}
 	return (Ray*)rayBatchBuffer->hostBuffer;
 }
@@ -1451,26 +1490,31 @@ void World::Render()
 		if (!screen)
 		{
 			screen = new Buffer( targetTextureID, Buffer::TARGET );
+		#if TAA == 0
 			renderer->SetArgument( 0, screen );
+		#else
+			renderer->SetArgument( 0, tmpFrame );
+		#endif
 			renderer->SetArgument( 1, paramBuffer );
-			renderer->SetArgument( 2, tmpFrame );
-			renderer->SetArgument( 3, &gridMap );
-			renderer->SetArgument( 4, brickBuffer[0] );
-			renderer->SetArgument( 5, brickBuffer[1] );
-			renderer->SetArgument( 6, brickBuffer[2] );
-			renderer->SetArgument( 7, brickBuffer[3] );
-			renderer->SetArgument( 8, sky );
-			renderer->SetArgument( 9, blueNoise );
-		#if THIRDLEVEL
-			renderer->SetArgument( 10, &uberGrid );
+			renderer->SetArgument( 2, &gridMap );
+			renderer->SetArgument( 3, sky );
+			renderer->SetArgument( 4, blueNoise );
+			renderer->SetArgument( 5, &uberGrid );
+		#if ONEBRICKBUFFER == 1
+			renderer->SetArgument( 6, brickBuffer );
+		#else
+			renderer->SetArgument( 6, brickBuffer[0] );
+			renderer->SetArgument( 7, brickBuffer[1] );
+			renderer->SetArgument( 8, brickBuffer[2] );
+			renderer->SetArgument( 9, brickBuffer[3] );
 		#endif
 		}
 		static int histIn = 0, histOut = 1;
 	#if TAA == 0
 		renderer->Run( screen, make_int2( 8, 16 ), 0, &renderDone );
 	#else
-		renderer->Run( screen, make_int2( 8, 16 ) );
-		// renderer->Run2D( make_int2( SCRWIDTH, SCRHEIGHT ), make_int2( 8, 16 ) );
+		// renderer->Run( screen, make_int2( 8, 16 ) );
+		renderer->Run2D( make_int2( SCRWIDTH, SCRHEIGHT ), make_int2( 8, 16 ) );
 		finalizer->SetArgument( 0, history[histIn] );
 		finalizer->SetArgument( 1, history[histOut] );
 		finalizer->SetArgument( 2, tmpFrame );
@@ -1553,18 +1597,16 @@ void World::Commit()
 		printf( "hermits detected in %5.2fms\n", duration / 1000000000.0f );
 	#endif
 	#endif
-	#if THIRDLEVEL == 1
 		const size_t ws = UBERWIDTH * UBERHEIGHT * UBERDEPTH;
 		const size_t ls = 16;
 		clEnqueueNDRangeKernel( Kernel::GetQueue2(), uberGridUpdater->GetKernel(), 1, 0, &ws, &ls, 0, 0, &ubergridDone );
-	#if 1
+	#if 0
 		clWaitForEvents( 1, &ubergridDone );
 		cl_ulong uberStart = 0, uberEnd = 0;
 		clGetEventProfilingInfo( ubergridDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &uberStart, 0 );
 		clGetEventProfilingInfo( ubergridDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &uberEnd, 0 );
 		unsigned long duration = (unsigned long)(uberEnd - uberStart); // in nanoseconds
 		printf( "ubergrid constructed in %10.7fms\n", duration / 1000000.0f );
-	#endif
 	#endif
 	#if GRID_IN_3DIMAGE == 1
 		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer

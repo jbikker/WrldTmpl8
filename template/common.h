@@ -41,7 +41,7 @@
 #define TAA			0	// 0 to disable, 1 to enable
 
 // MSAA
-#define AA_SAMPLES	3	// 1 to disable, 2..4 to enable. Note: will be squared.
+#define AA_SAMPLES	5	// 1 to disable, 2..4 to enable. Note: will be squared.
 
 // some useful color names
 #ifdef VOXEL8
@@ -112,7 +112,8 @@ struct RenderParams
 // experimental
 #define GRID_IN_3DIMAGE	1 // slightly faster
 #define CELLSKIPPING	0 // take larger steps when possible
-#define THIRDLEVEL		1 // three-level grid traversal
+#define ONEBRICKBUFFER	1 // use a single (large) brick buffer; set to 0 on low mem devices
+#define MORTONBRICKS	0 // store bricks in morton order to improve data locality (slower)
 
 // constants
 #define PI			3.14159265358979323846264f

@@ -404,7 +404,11 @@ private:
 	// data members
 	mat4 camMat;						// camera matrix to be used for rendering
 	uint* grid = 0, * gridOrig = 0;		// pointer to host-side copy of the top-level grid
-	Buffer* brickBuffer[4];				// OpenCL buffer for the bricks
+#if ONEBRICKBUFFER == 1
+	Buffer* brickBuffer;				// OpenCL buffer for the bricks
+#else
+	Buffer* brickBuffer[4];				// OpenCL buffers for the bricks
+#endif
 	PAYLOAD* brick = 0;					// pointer to host-side copy of the bricks
 	uint* modified = 0;					// bitfield to mark bricks for synchronization
 	BrickInfo* brickInfo = 0;			// maintenance data for bricks: zeroes, location
@@ -429,11 +433,12 @@ private:
 	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
 	cl_event hermitDone;				// for profiling
 #endif
-#if THIRDLEVEL == 1
+#if MORTONBRICKS == 1
+	Kernel* encodeBricks;				// reorganizes brick data on the GPU
+#endif
 	cl_mem uberGrid = 0;				// 32x32x32 top-level grid (device-side only)
 	Kernel* uberGridUpdater;			// build a 32x32x32 top-level grid over the brickmap
 	cl_event ubergridDone;				// for profiling
-#endif
 	cl_event copyDone, commitDone;		// events for queue synchronization
 	cl_event renderDone;				// event used for profiling
 	float renderTime;					// render time for the previous frame (in seconds)

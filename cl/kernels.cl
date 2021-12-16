@@ -8,11 +8,14 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 #else
 	__global const unsigned int* grid,
 #endif
-	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise
-#if THIRDLEVEL == 1
-	, __global const unsigned char* uberGrid
+	__global const PAYLOAD* brick0,
+#if ONEBRICKBUFFER == 0
+	__global const PAYLOAD* brick1,
+	__global const PAYLOAD* brick2,
+	__global const PAYLOAD* brick3,
 #endif
+	__global float4* sky, __global const uint* blueNoise,
+	__global const unsigned char* uberGrid
 )
 {
 	// basic AA
@@ -21,24 +24,23 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 	for (int u = 0; u < AA_SAMPLES; u++) for (int v = 0; v < AA_SAMPLES; v++)
 	{
 		// trace primary ray
-		float3 N;
+		uint side = 0;
 		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
-	#if THIRDLEVEL == 1
-		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */, uberGrid );
+	#if ONEBRICKBUFFER == 1
+		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
 	#else
-		const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 	#endif
 		// simple hardcoded directional lighting using arbitrary unit vector
 		if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
-		const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
-		float4 sky;
-		if (N.x < -0.9f) sky = params->skyLight[0];
-		if (N.x > 0.9f) sky = params->skyLight[1];
-		if (N.y < -0.9f) sky = params->skyLight[2];
-		if (N.y > 0.9f) sky = params->skyLight[3];
-		if (N.z < -0.9f) sky = params->skyLight[4];
-		if (N.z > 0.9f) sky = params->skyLight[5];
-		pixel += BRDF1 * params->skyLightScale * sky.xyz; // 1.6f * (1.0f + 0.7f * dot( N, (float3)(0.2357f, 0.9428f, 0.2357f) ));
+		{	// scope limiting
+			const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
+			float4 sky;
+			if (side == 0) sky = params->skyLight[D.x > 0 ? 0 : 1];
+			if (side == 1) sky = params->skyLight[D.y > 0 ? 2 : 3];
+			if (side == 2) sky = params->skyLight[D.z > 0 ? 4 : 5];
+			pixel += BRDF1 * params->skyLightScale * sky.xyz;
+		}
 	}
 	return (float4)(pixel * (1.0f / (AA_SAMPLES * AA_SAMPLES)), dist);
 }
@@ -49,21 +51,24 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 #else
 	__global const unsigned int* grid,
 #endif
-	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise
-#if THIRDLEVEL == 1
-	, __global const unsigned char* uberGrid
+	__global const PAYLOAD* brick0,
+#if ONEBRICKBUFFER == 0
+	__global const PAYLOAD* brick1,
+	__global const PAYLOAD* brick2,
+	__global const PAYLOAD* brick3,
 #endif
+	__global float4* sky, __global const uint* blueNoise,
+	__global const unsigned char* uberGrid
 )
 {
 	// trace primary ray
 	float dist;
-	float3 N;
+	uint side = 0;
 	const float3 D = GenerateCameraRay( screenPos, params );
-#if THIRDLEVEL == 1
-	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */, uberGrid );
+#if ONEBRICKBUFFER == 1
+	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
 #else
-	const uint voxel = TraceRay( (float4)(params->E, 1), (float4)(D, 1), &dist, &N, grid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 #endif
 	const float skyLightScale = params->skyLightScale;
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
@@ -72,19 +77,21 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	float3 incoming = (float3)(0, 0, 0);
 	const int x = (int)screenPos.x, y = (int)screenPos.y;
 	uint seed = WangHash( x * 171 + y * 1773 + params->R0 );
-	const float4 I = (float4)(params->E + D * dist, 1);
+	const float4 I = (float4)(params->E + D * dist, 0);
 	for (int i = 0; i < GIRAYS; i++)
 	{
 		const float r0 = blueNoiseSampler( blueNoise, x, y, i + GIRAYS * params->frame, 0 );
 		const float r1 = blueNoiseSampler( blueNoise, x, y, i + GIRAYS * params->frame, 1 );
+		const float3 N = VoxelNormal( side, D );
 		const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
-		float3 N2;
+		uint side2;
 		float dist2;
-	#if THIRDLEVEL == 1
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12, uberGrid );
+	#if ONEBRICKBUFFER == 1
+		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, brick0, GRIDWIDTH / 12 );
 	#else
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 1), R, &dist2, &N2, grid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
+		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
 	#endif
+		const float3 N2 = VoxelNormal( side2, R.xyz );
 		if (0 /* for comparing against ground truth */) // get_global_id( 0 ) % SCRWIDTH < SCRWIDTH / 2)
 		{
 			if (voxel2 == 0) incoming += skyLightScale * SampleSky( (float3)(R.x, R.z, R.y), sky, params->skyWidth, params->skyHeight ); else /* secondary hit */
@@ -110,17 +117,25 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	return (float4)(BRDF1 * incoming * (1.0f / GIRAYS), dist);
 }
 
-__kernel void render( write_only image2d_t outimg, __constant struct RenderParams* params,
+__kernel void render( 
+#if TAA == 0
+	write_only image2d_t outimg,
+#else
 	__global float4* frame,
+#endif
+	__constant struct RenderParams* params,
 #if GRID_IN_3DIMAGE == 1
 	__read_only image3d_t grid,
 #else
 	__global const unsigned int* grid,
 #endif
-	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3, __global float4* sky, __global const uint* blueNoise
-#if THIRDLEVEL == 1
-	, __global const unsigned char* uberGrid
+	__global float4* sky, __global const uint* blueNoise,
+	__global const unsigned char* uberGrid,
+	__global const PAYLOAD* brick0
+#if ONEBRICKBUFFER == 0
+	, __global const PAYLOAD* brick1,
+	__global const PAYLOAD* brick2,
+	__global const PAYLOAD* brick3
 #endif
 )
 {
@@ -128,16 +143,16 @@ __kernel void render( write_only image2d_t outimg, __constant struct RenderParam
 	const int x = get_global_id( 0 );
 	const int y = get_global_id( 1 );
 #if GIRAYS == 0
-#if THIRDLEVEL == 1
-	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
+#if ONEBRICKBUFFER == 1
+	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, sky, blueNoise, uberGrid );
 #else
-	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
 #endif
 #else
-#if THIRDLEVEL == 1
-	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
+#if ONEBRICKBUFFER == 1
+	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, sky, blueNoise, uberGrid );
 #else
-	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise );
+	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
 #endif
 #endif
 #if TAA == 1
@@ -230,12 +245,10 @@ __kernel void unsharpen( write_only image2d_t outimg, __global float4* pixels )
 
 __kernel void traceBatch(
 	__read_only image3d_t grid,
-	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3,
-	const int batchSize, __global const float4* rayData, __global uint* hitData
-#if THIRDLEVEL == 1
-	, __global const unsigned char* uberGrid
-#endif
+	__global const PAYLOAD* brick0, __global const PAYLOAD* brick1,
+	__global const PAYLOAD* brick2, __global const PAYLOAD* brick3,
+	const int batchSize, __global const float4* rayData, __global uint* hitData,
+	__global const unsigned char* uberGrid
 )
 {
 	// sanity check
@@ -247,17 +260,17 @@ __kernel void traceBatch(
 	// trace ray
 	float3 N;
 	float dist;
-#if THIRDLEVEL == 1
-	const uint voxel = TraceRay( 
-		(float4)(O4.x, O4.y, O4.z, 1), 
-		(float4)(D4.x, D4.y, D4.z, 1), 
-		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999, uberGrid
+#if ONEBRICKBUFFER == 1
+	const uint voxel = TraceRay(
+		(float4)(O4.x, O4.y, O4.z, 0),
+		(float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, uberGrid, brick0, 999999
 	);
 #else
-	const uint voxel = TraceRay( 
-		(float4)(O4.x, O4.y, O4.z, 1), 
-		(float4)(D4.x, D4.y, D4.z, 1), 
-		&dist, &N, grid, brick0, brick1, brick2, brick3, 999999 
+	const uint voxel = TraceRay(
+		(float4)(O4.x, O4.y, O4.z, 0),
+		(float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, uberGrid, brick0, brick1, brick2, brick3, 999999
 	);
 #endif
 	// store query result
@@ -268,12 +281,10 @@ __kernel void traceBatch(
 
 __kernel void traceBatchToVoid(
 	__read_only image3d_t grid,
-	__global const unsigned char* brick0, __global const unsigned char* brick1,
-	__global const unsigned char* brick2, __global const unsigned char* brick3,
-	const int batchSize, __global const float4* rayData, __global uint* hitData
-#if THIRDLEVEL == 1
-	, __global const unsigned char* uberGrid
-#endif
+	__global const PAYLOAD* brick0, __global const PAYLOAD* brick1,
+	__global const PAYLOAD* brick2, __global const PAYLOAD* brick3,
+	const int batchSize, __global const float4* rayData, __global uint* hitData,
+	__global const unsigned char* uberGrid
 )
 {
 	// sanity check
@@ -285,19 +296,11 @@ __kernel void traceBatchToVoid(
 	// trace ray
 	float3 N;
 	float dist;
-#if THIRDLEVEL == 1
 	TraceRayToVoid(
-		(float4)(O4.x, O4.y, O4.z, 1),
+		(float4)(O4.x, O4.y, O4.z, 0),
 		(float4)(D4.x, D4.y, D4.z, 1),
 		&dist, &N, grid, brick0, brick1, brick2, brick3, uberGrid
 	);
-#else
-	TraceRayToVoid(
-		(float4)(O4.x, O4.y, O4.z, 1),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, brick0, brick1, brick2, brick3
-	);
-#endif
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
 	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
@@ -311,16 +314,43 @@ __kernel void commit( const int taskCount, __global uint* commit,
 	int task = get_global_id( 0 );
 	if (task < taskCount)
 	{
+	#if ONEBRICKBUFFER == 0
 		__global uint* bricks[4] = { brick0, brick1, brick2, brick3 };
+	#endif
 		int brickId = commit[task + GRIDSIZE];
 		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + task * (BRICKSIZE * PAYLOADSIZE) / 4;
 		const uint offset = brickId * BRICKSIZE * PAYLOADSIZE / 4; // in dwords
+	#if ONEBRICKBUFFER == 1
+	#if MORTONBRICKS == 1
+		__global PAYLOAD* dst = (__global PAYLOAD*)(brick0 + offset);
+		for (int z = 0; z < 8; z++)
+			for (int y = 0; y < 8; y++)
+				for (int x = 0; x < 8; x++)
+					dst[Morton3Bit( x, y, z )] = ((__global PAYLOAD*)src)[x + y * 8 + z * 64];
+	#else
+		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) brick0[offset + i] = src[i];
+	#endif
+	#else
 		__global uint* page = bricks[(offset / (CHUNKSIZE / 4)) & 3];
 		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) page[(offset & (CHUNKSIZE / 4 - 1)) + i] = src[i];
+	#endif
 	}
 }
 
-#if THIRDLEVEL == 1
+__kernel void encodeBricks( const int taskCount, __global PAYLOAD* brick )
+{
+	// change brick layout to morton order
+	int task = get_global_id( 0 );
+	if (task < taskCount)
+	{
+		PAYLOAD tmp[512];
+		for (int i = 0; i < 512; i++) tmp[i] = brick[task * 512 + i];
+		for (int z = 0; z < 8; z++)
+			for (int y = 0; y < 8; y++)
+				for (int x = 0; x < 8; x++)
+					brick[task * 512 + Morton3Bit( x, y, z )] = tmp[x + y * 8 + z * 64];
+	}
+}
 
 __kernel void updateUberGrid( const __global unsigned int* grid, __global unsigned char* uber )
 {
@@ -344,8 +374,6 @@ __kernel void updateUberGrid( const __global unsigned int* grid, __global unsign
 	// write result
 	uber[x + z * UBERWIDTH + y * UBERWIDTH * UBERHEIGHT] = empty ? 0 : 1;
 }
-
-#endif
 
 #if CELLSKIPPING == 1
 

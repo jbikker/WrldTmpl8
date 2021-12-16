@@ -200,3 +200,25 @@ float3 bilerpSample( const __global float4* buffer, const float u, const float v
 	float4 p3 = fu * fv * buffer[iu1 + iv1 * SCRWIDTH];
 	return (p0 + p1 + p2 + p3).xyz;
 }
+
+// inefficient morton code for bricks (3 bit per axis, x / y / z)
+int Morton3Bit( const int x, const int y, const int z )
+{	
+	return (x & 1) + 2 * (y & 1) + 4 * (z & 1) +
+		4 * (x & 2) + 8 * (y & 2) + 16 * (z & 2) +
+		16 * (x & 4) + 32 * (y & 4) + 64 * (z & 4);
+}
+int Morton3( const int xyz )
+{	
+	return (xyz & 1) + ((xyz & 8) >> 2) + ((xyz & 64) >> 4) +
+		((xyz & 2) << 2) + (xyz & 16) + ((xyz & 128) >> 2) + 
+		((xyz & 4) << 4) + ((xyz & 32) << 2) + (xyz & 256);
+}
+
+// building a normal from an axis and a ray direction
+float3 VoxelNormal( const uint side, const float3 D )
+{
+	if (side == 0) return (float3)(D.x > 0 ? -1 : 1, 0, 0 );
+	if (side == 1) return (float3)(0, D.y > 0 ? -1 : 1, 0 );
+	if (side == 2) return (float3)(0, 0, D.z > 0 ? -1 : 1 );
+}
