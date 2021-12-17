@@ -67,7 +67,7 @@ uint TraceRay( float3 A, const float3 B, float* dist, uint* side, __read_only im
 	const float3 V = FixZeroDeltas( B );
 	const float rVx = 1.0f / V.x, rVy = 1.0f / V.y, rVz = 1.0f / V.z;
 	float to = 0; // distance to travel to get into grid
-	const int bits = select( 4, 34, V.z > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.x > 0 ); // magic
+	const int bits = select( 4, 34, V.x > 0 ) + select( 3072, 10752, V.y > 0 ) + select( 1310720, 3276800, V.z > 0 ); // magic
 	uint last = 0, dx = DIR_X << 20, dy = DIR_Y << 10, dz = DIR_Z;
 	if (A.x < 0 || A.y < 0 || A.z < 0 || A.x > MAPWIDTH || A.y > MAPHEIGHT || A.z > MAPDEPTH)
 	{
@@ -131,8 +131,8 @@ uint TraceRay( float3 A, const float3 B, float* dist, uint* side, __read_only im
 					uint v;
 					BRICKSTEP; BRICKSTEP; BRICKSTEP; BRICKSTEP;
 					BRICKSTEP; BRICKSTEP; BRICKSTEP; BRICKSTEP;
-					BRICKSTEP; BRICKSTEP; BRICKSTEP; BRICKSTEP; // unrolling: +5.0%
-					BRICKSTEP; BRICKSTEP; BRICKSTEP; BRICKSTEP; // goto: +2.5% :)
+					BRICKSTEP; BRICKSTEP; BRICKSTEP; BRICKSTEP;
+					BRICKSTEP; BRICKSTEP; BRICKSTEP; BRICKSTEP;
 				the_exit:
 					tm = tm_; // restore top-grid traversal state
 				}
