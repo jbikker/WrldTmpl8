@@ -27,9 +27,9 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 		uint side = 0;
 		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
 	#if ONEBRICKBUFFER == 1
-		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
+		const uint voxel = TraceRay( params->E, D, &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
 	#else
-		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+		const uint voxel = TraceRay( params->E, D, &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 	#endif
 		// simple hardcoded directional lighting using arbitrary unit vector
 		if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
@@ -66,30 +66,30 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	uint side = 0;
 	const float3 D = GenerateCameraRay( screenPos, params );
 #if ONEBRICKBUFFER == 1
-	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
+	const uint voxel = TraceRay( params->E, D, &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
 #else
-	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
+	const uint voxel = TraceRay( params->E, D, &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
 #endif
 	const float skyLightScale = params->skyLightScale;
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
 	if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
 	const float3 BRDF1 = INVPI * ToFloatRGB( voxel );
-	float3 incoming = (float3)(0, 0, 0);
+	float3 incoming = (float3)(0);
 	const int x = (int)screenPos.x, y = (int)screenPos.y;
 	uint seed = WangHash( x * 171 + y * 1773 + params->R0 );
-	const float4 I = (float4)(params->E + D * dist, 0);
+	const float3 I = params->E + D * dist;
 	for (int i = 0; i < GIRAYS; i++)
 	{
 		const float r0 = blueNoiseSampler( blueNoise, x, y, i + GIRAYS * params->frame, 0 );
 		const float r1 = blueNoiseSampler( blueNoise, x, y, i + GIRAYS * params->frame, 1 );
 		const float3 N = VoxelNormal( side, D );
-		const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
+		const float3 R = DiffuseReflectionCosWeighted( r0, r1, N );
 		uint side2;
 		float dist2;
 	#if ONEBRICKBUFFER == 1
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, brick0, GRIDWIDTH / 12 );
+		const uint voxel2 = TraceRay( I + 0.1f * N, R, &dist2, &side2, grid, uberGrid, brick0, GRIDWIDTH / 12 );
 	#else
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
+		const uint voxel2 = TraceRay( I + 0.1f * N, R, &dist2, &side2, grid, uberGrid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
 	#endif
 		const float3 N2 = VoxelNormal( side2, R.xyz );
 		if (0 /* for comparing against ground truth */) // get_global_id( 0 ) % SCRWIDTH < SCRWIDTH / 2)
@@ -117,7 +117,7 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	return (float4)(BRDF1 * incoming * (1.0f / GIRAYS), dist);
 }
 
-__kernel void render( 
+__kernel void render(
 #if TAA == 0
 	write_only image2d_t outimg,
 #else
@@ -261,17 +261,9 @@ __kernel void traceBatch(
 	float3 N;
 	float dist;
 #if ONEBRICKBUFFER == 1
-	const uint voxel = TraceRay(
-		(float4)(O4.x, O4.y, O4.z, 0),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, uberGrid, brick0, 999999
-	);
+	const uint voxel = TraceRay( O4.xyz, D4.xyz, &dist, &N, grid, uberGrid, brick0, 999999 );
 #else
-	const uint voxel = TraceRay(
-		(float4)(O4.x, O4.y, O4.z, 0),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, uberGrid, brick0, brick1, brick2, brick3, 999999
-	);
+	const uint voxel = TraceRay( O4.xyz, D4.xyz, &dist, &N, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 );
 #endif
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
@@ -296,11 +288,7 @@ __kernel void traceBatchToVoid(
 	// trace ray
 	float3 N;
 	float dist;
-	TraceRayToVoid(
-		(float4)(O4.x, O4.y, O4.z, 0),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, brick0, brick1, brick2, brick3, uberGrid
-	);
+	TraceRayToVoid( O4.xyz, D4.xyz, &dist, &N, grid, brick0, brick1, brick2, brick3, uberGrid );
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
 	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
