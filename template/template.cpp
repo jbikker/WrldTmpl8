@@ -1274,7 +1274,7 @@ Kernel::Kernel( char* file, char* entryPoint )
 	// why does the nvidia compiler not support these:
 	// -cl-nv-maxrregcount=64 not faster than leaving it out (same for 128)
 	// -cl-no-subgroup-ifp ? fails on nvidia.
-	error = clBuildProgram( program, 0, NULL, "-cl-nv-maxrregcount=64 -cl-nv-verbose -cl-fast-relaxed-math -cl-mad-enable -cl-single-precision-constant", NULL, NULL );
+	error = clBuildProgram( program, 0, NULL, "-cl-nv-verbose -cl-fast-relaxed-math -cl-mad-enable -cl-single-precision-constant", NULL, NULL );
 	// handle errors
 	if (error == CL_SUCCESS)
 	{
