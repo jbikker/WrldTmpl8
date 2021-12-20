@@ -1,11 +1,16 @@
 // Optimizations / plans:
-// 1. Automate finding the optimal workgroup size
-// 2. Keep trying with fewer registers
-// 3. Try a 1D job and turn it into tiles in the render kernel
-// 4. If all threads enter the same brick, this brick can be in local mem
-// 5. (DONE) Try some unrolling on the 2nd loop?
-// 6. (DONE) Optimize the world: combine 8x8x8 solid voxels
-// 7. Optimize for 2080 and 1080
+//  1. Automate finding the optimal workgroup size
+//  2. Keep trying with fewer registers
+//  3. Try a 1D job and turn it into tiles in the render kernel
+//  4. If all threads enter the same brick, this brick can be in local mem
+//  5. (DONE) Try some unrolling on the 2nd loop?
+//  6. (DONE) Optimize the world: combine 8x8x8 solid voxels
+//  7. Optimize for 2080 and 1080
+//  8. Add UI to obj2vox
+//  9. Create a website with a library of vox files
+// 10. Improve readme.md
+// 11. Figure out how to detect 1080/2080/3080/AMD/other
+// 12. Have a nicer benchmark scene: planet with asteroid debris?
 
 // internal stuff
 #define OFFS_X		((bits >> 5) & 1)			// extract grid plane offset over x (0 or 1)
@@ -145,8 +150,12 @@ uint TraceRay( float4 A, const float4 B, float* dist, uint* side, __read_only im
 			#if ONEBRICKBUFFER == 0
 				__global const PAYLOAD* page;
 			#endif
-				GRIDSTEP(exit1); GRIDSTEP(exit2);
-				GRIDSTEP(exit3); GRIDSTEP(exit4);
+			#ifdef ISAMPERE
+				GRIDSTEP(exit1); GRIDSTEP(exit2); // Ampere has massive L1I$;
+				GRIDSTEP(exit3); GRIDSTEP(exit4); // unroll 4x for best performance.
+			#else
+				GRIDSTEP(exit1); // Turing and older have smaller L1I$, don't unroll
+			#endif
 			}
 			// restore ubergrid traversal state
 			tm = tm_;

@@ -1224,6 +1224,15 @@ Kernel::Kernel( char* file, char* entryPoint )
 	// load a cl file
 	string csText = TextFileRead( file );
 	if (csText.size() == 0) FatalError( "File %s not found", file );
+	// add vendor defines
+	vendorLines = 0;
+	if (isNVidia) csText = "#define ISNVIDIA\n" + csText, vendorLines++;
+	if (isAMD) csText = "#define ISAMD\n" + csText, vendorLines++;
+	if (isIntel) csText = "#define ISINTEL\n" + csText, vendorLines++;
+	if (isOther) csText = "#define ISOTHER\n" + csText, vendorLines++;
+	if (isAmpere) csText = "#define ISAMPERE\n" + csText, vendorLines++;
+	if (isTuring) csText = "#define ISTURING\n" + csText, vendorLines++;
+	if (isPascal) csText = "#define ISPASCAL\n" + csText, vendorLines++;
 	// expand #include directives: cl compiler doesn't support these natively
 	// warning: this simple system does not handle nested includes.
 	struct Include { int start, end; string file; } includes[64];
@@ -1329,6 +1338,7 @@ Kernel::Kernel( char* file, char* entryPoint )
 				lineNr--; // we count from 0 instead of 1
 				// adjust file and linenr based on include file data
 				string errorFile = file;
+				bool errorInInclude = false;
 				for (int i = Ninc - 1; i >= 0; i--)
 				{
 					if (lineNr > includes[i].end)
@@ -1340,9 +1350,11 @@ Kernel::Kernel( char* file, char* entryPoint )
 					{
 						errorFile = includes[i].file;
 						lineNr -= includes[i].start;
+						errorInInclude = true;
 						break;
 					}
 				}
+				if (!errorInInclude) lineNr -= vendorLines;
 				// present error message
 				char t[1024];
 				sprintf( t, "file %s, line %i, pos %i:\n%s", errorFile.c_str(), lineNr + 1, linePos, lns );
@@ -1439,6 +1451,79 @@ bool Kernel::InitCL()
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_NAME, 1024, &device_string, NULL );
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_VERSION, 1024, &device_platform, NULL );
 	printf( "Device # %u, %s (%s)\n", deviceUsed, device_string, device_platform );
+	// digest device string
+	char* d = device_string;
+	for( int i = 0; i < strlen( d ); i++ ) if (d[i] >= 'A' && d[i] <= 'Z') d[i] -= 'A' - 'a';
+	if (strstr( d, "nvidia" ))
+	{
+		isNVidia = true;
+		if (strstr( d, "rtx" ))
+		{
+			// detect Ampere GPUs
+			if (strstr( d, "3050" ) || strstr( d, "3060" ) || strstr( d, "3070" ) || strstr( d, "3080" ) || strstr( d, "3090" )) isAmpere = true;
+			if (strstr( d, "a2000" ) || strstr( d, "a3000" ) || strstr( d, "a4000" ) || strstr( d, "a5000" ) || strstr( d, "a6000" )) isAmpere = true;
+			// detect Turing GPUs
+			if (strstr( d, "2060" ) || strstr( d, "2070" ) || strstr( d, "2080" )) isTuring = true;
+			// detect Titan RTX
+			if (strstr( d, "titan rtx" )) isTuring = true;
+			// detect Turing Quadro
+			if (strstr( d, "quadro" )) 
+			{
+				if (strstr( d, "3000" ) || strstr( d, "4000" ) || strstr( d, "5000" ) || strstr( d, "6000" ) || strstr( d, "8000" )) isTuring = true;
+			}
+		}
+		else if (strstr( d, "gtx" ))
+		{
+			// detect Turing GPUs
+			if (strstr( d, "1650" ) || strstr( d, "1660" )) isTuring = true;
+			// detect Pascal GPUs
+			if (strstr( d, "1010" ) || strstr( d, "1030" ) || strstr( d, "1050" ) || strstr( d, "1060" ) || strstr( d, "1070" ) || strstr( d, "1080" )) isPascal = true;
+		}
+		else if (strstr( d, "quadro" ))
+		{
+			// detect Pascal GPUs
+			if (strstr( d, "p2000" ) || strstr( d, "p1000" ) || strstr( d, "p600" ) || strstr( d, "p400" ) || strstr( d, "p5000" ) || strstr( d, "p100" )) isPascal = true;
+		}
+		else
+		{
+			// detect Pascal GPUs
+			if (strstr( d, "titan x" )) isPascal = true;
+		}
+	}
+	else if (strstr( d, "amd" ))
+	{
+		isAMD = true;
+	}
+	else if (strstr( d, "intel" ))
+	{
+		isIntel = true;
+	}
+	else
+	{
+		isOther = true;
+	}
+	// report on findings
+	printf( "hardware detected: " );
+	if (isNVidia) 
+	{
+		printf( "NVIDIA, " );
+		if (isAmpere) printf( "AMPERE class.\n" );
+		else if (isTuring) printf( "TURING class.\n" );
+		else if (isPascal) printf( "PASCAL class.\n" );
+		else printf( "PRE-PASCAL hardware (warning: slow).\n" );
+	}
+	else if (isAMD)
+	{
+		printf( "AMD.\n" );
+	}
+	else if (isIntel)
+	{
+		printf( "Intel.\n" );
+	}
+	else
+	{
+		printf( "identification failed.\n" );
+	}
 	// create a command-queue
 	queue = clCreateCommandQueue( context, devices[deviceUsed], CL_QUEUE_PROFILING_ENABLE, &error );
 	if (!CHECKCL( error )) return false;
