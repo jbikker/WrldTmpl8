@@ -175,6 +175,7 @@ public:
 	float3 SampleSky( const float3& D );
 	void UpdateSkylights(); // updates the six skylight colors
 	void ForceSyncAllBricks();
+	void OptimizeBricks();
 	// camera
 	void SetCameraMatrix( const mat4& m ) { camMat = m; }
 	float3 GetCameraViewDir() { return make_float3( camMat[2], camMat[6], camMat[10] ); }

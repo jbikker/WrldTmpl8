@@ -381,7 +381,8 @@ void main()
 	game->Init();
 	// add a skydome to the world
 	world->LoadSky( Game::skyDomeImage.c_str(), Game::skyDomeScale );
-	// after init, sync all bricks to GPU
+	// after init, optimize world and sync all bricks to GPU
+	world->OptimizeBricks();
 	world->ForceSyncAllBricks();
 	// done, enter main loop
 	Shader* shader = new Shader(

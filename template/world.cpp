@@ -204,6 +204,38 @@ void World::ForceSyncAllBricks()
 #endif
 }
 
+// World::OptimizeBricks: replace single-color solid bricks
+// ----------------------------------------------------------------------------
+void World::OptimizeBricks()
+{
+	Timer t;
+	int replaced = 0;
+	for( int i = 0; i < GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH; i++ )
+	{
+		const uint value = grid[i];
+		if (!(value & 1)) continue; // already solid, or empty
+		bool solid = true; // let's start with this assumption
+		uint brickOffset = (value >> 1) * BRICKSIZE;
+		uint firstVoxel = brick[brickOffset];
+		for( int j = 1; j < BRICKSIZE; j++ ) if (brick[brickOffset + j] != firstVoxel)
+		{
+			// we found a voxel that is not identical to the first one; stop
+			solid = false;
+			break;
+		}
+		if (solid)
+		{
+			// this one has 8x8x8 times the same voxel; replace by solid brick in grid
+			grid[i] = firstVoxel << 1;
+			// recycle brick
+			FreeBrick( value >> 1 );
+			// statistics
+			replaced++;
+		}
+	}
+	printf( "optimizing world data took %5.2fms; replaced %i bricks.\n", t.elapsed() * 1000.0f, replaced );
+}
+
 // World::DummyWorld: box
 // ----------------------------------------------------------------------------
 void World::DummyWorld()

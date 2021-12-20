@@ -3,7 +3,9 @@
 // 2. Keep trying with fewer registers
 // 3. Try a 1D job and turn it into tiles in the render kernel
 // 4. If all threads enter the same brick, this brick can be in local mem
-// 5. Try some unrolling on the 2nd loop?
+// 5. (DONE) Try some unrolling on the 2nd loop?
+// 6. (DONE) Optimize the world: combine 8x8x8 solid voxels
+// 7. Optimize for 2080 and 1080
 
 // internal stuff
 #define OFFS_X		((bits >> 5) & 1)			// extract grid plane offset over x (0 or 1)
@@ -67,7 +69,7 @@ float4 FixZeroDeltas( float4 V )
 			clamp( p4.z, (tp << 3) & 1023, ((tp << 3) & 1023) + 7 ), lp = ~1;					\
 		tm = (convert_float4( (uint4)((p >> 20) + OFFS_X, ((p >> 10) & 1023) +					\
 			OFFS_Y, (p & 1023) + OFFS_Z, 0) ) - A) * rV;										\
-		p &= 7 + (7 << 10) + (7 << 20), o = (o >> 1) * BRICKSIZE;								\
+		p &= 7 + (7 << 10) + (7 << 20), o = --o << 8;											\
 		BRICKSTEP( exitX ); BRICKSTEP( exitX ); BRICKSTEP( exitX ); BRICKSTEP( exitX );			\
 		BRICKSTEP( exitX ); BRICKSTEP( exitX ); BRICKSTEP( exitX ); BRICKSTEP( exitX );			\
 		BRICKSTEP( exitX ); BRICKSTEP( exitX ); BRICKSTEP( exitX ); BRICKSTEP( exitX );			\
