@@ -46,11 +46,6 @@ Breda, 2014 and 2020-2021, NHTV/IGAD/BUAS<br/>
 Jacco Bikker<br/>
 Report problems and suggestions to bikker.j@gmail.com.
 
-*Changelog*
-
-v2021-01: 
-initial 3D template release.
-
 ![ScreenShot](template_scrn0.png)
 
 
