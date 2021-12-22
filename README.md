@@ -15,9 +15,31 @@ Unity and Unreal. You get full control over your machine, and you
 are welcome to dive deep into the template code, to change it as
 you wish, once you are ready to do so.
 
+*Performance:*
+
+Although the engine is aimed towards basic game development, it comes
+with state-of-the-art ray tracing with high performance code for
+the latest GPUs as well as older ones. Up to 2 billion rays per
+second in non-trivial scenes are possible on a RTX3080Ti GPU - 
+but without using RTX. Even a 1080 will do well over half a billion
+rays per second. Combined with TAA and global illumination, this
+renders your scenes with high fidelity, even at high resolutions.
+
+![ScreenShot](template_scrn2.png)
+
+*Tools:*
+
+Import models created with MagicaVoxel, including animated models.
+And if it turns out to be hard to find those .vox files, just
+create your own, for example by converting them from .obj files,
+using the included tool.
+
+![ScreenShot](template_scrn3.png)
+
 *Copyright*
 
-This code is completely free to use and distribute in any form.
+This code is completely free to use and distribute in any form. Build,
+play and sell your game without obstacles.
 
 Utrecht, 2015-2021, Utrecht University<br/>
 Breda, 2014 and 2020-2021, NHTV/IGAD/BUAS<br/>
