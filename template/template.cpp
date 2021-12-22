@@ -17,7 +17,7 @@ using namespace Tmpl8;
 // Note: this does cause the linker to produce a .lib and .exp file;
 // see http://developer.download.nvidia.com/devzone/devcenter/gamegraphics/files/OptimusRenderingPolicies.pdf
 #ifdef WIN32
-/* extern "C"
+extern "C"
 {
 	__declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
 }
@@ -25,7 +25,7 @@ using namespace Tmpl8;
 extern "C"
 {
 	__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
-} */
+}
 #endif
 
 static GLFWwindow* window = 0;
@@ -1404,11 +1404,13 @@ bool Kernel::InitCL()
 	if (!CHECKCL( error = clGetDeviceIDs( platform, CL_DEVICE_TYPE_ALL, 0, NULL, &devCount ) )) return false;
 	devices = new cl_device_id[devCount];
 	if (!CHECKCL( error = clGetDeviceIDs( platform, CL_DEVICE_TYPE_ALL, devCount, devices, NULL ) )) return false;
-	unsigned int deviceUsed = -1;
-	unsigned int endDev = devCount - 1;
+	uint deviceUsed = -1;
 	// search a capable OpenCL device
-	for (unsigned int i = 0; i <= endDev; ++i)
+	char device_string[1024], device_platform[1024];
+	for (uint i = 0; i < devCount; i++)
 	{
+		// CHECKCL( error = clGetDeviceInfo( devices[i], CL_DEVICE_NAME, 1024, &device_string, NULL ) );
+		// if (strstr( device_string, "AMD" ) == 0) continue; // I insist on AMD
 		size_t extensionSize;
 		CHECKCL( error = clGetDeviceInfo( devices[i], CL_DEVICE_EXTENSIONS, 0, NULL, &extensionSize ) );
 		if (extensionSize > 0)
@@ -1447,13 +1449,12 @@ bool Kernel::InitCL()
 	device = getFirstDevice( context );
 	if (!CHECKCL( error )) return false;
 	// print device name
-	char device_string[1024], device_platform[1024];
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_NAME, 1024, &device_string, NULL );
 	clGetDeviceInfo( devices[deviceUsed], CL_DEVICE_VERSION, 1024, &device_platform, NULL );
 	printf( "Device # %u, %s (%s)\n", deviceUsed, device_string, device_platform );
 	// digest device string
 	char* d = device_string;
-	for( int i = 0; i < strlen( d ); i++ ) if (d[i] >= 'A' && d[i] <= 'Z') d[i] -= 'A' - 'a';
+	for (int i = 0; i < strlen( d ); i++) if (d[i] >= 'A' && d[i] <= 'Z') d[i] -= 'A' - 'a';
 	if (strstr( d, "nvidia" ))
 	{
 		isNVidia = true;
@@ -1467,7 +1468,7 @@ bool Kernel::InitCL()
 			// detect Titan RTX
 			if (strstr( d, "titan rtx" )) isTuring = true;
 			// detect Turing Quadro
-			if (strstr( d, "quadro" )) 
+			if (strstr( d, "quadro" ))
 			{
 				if (strstr( d, "3000" ) || strstr( d, "4000" ) || strstr( d, "5000" ) || strstr( d, "6000" ) || strstr( d, "8000" )) isTuring = true;
 			}
@@ -1504,7 +1505,7 @@ bool Kernel::InitCL()
 	}
 	// report on findings
 	printf( "hardware detected: " );
-	if (isNVidia) 
+	if (isNVidia)
 	{
 		printf( "NVIDIA, " );
 		if (isAmpere) printf( "AMPERE class.\n" );
@@ -1939,7 +1940,7 @@ void* get_proc( const char* namez ) {
 	}
 
 	return result;
-}
+	}
 
 int gladLoadGL( void ) {
 	int status = 0;
@@ -1948,7 +1949,7 @@ int gladLoadGL( void ) {
 	{
 		status = gladLoadGLLoader( &get_proc );
 		close_gl();
-}
+	}
 
 	return status;
 }

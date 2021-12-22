@@ -3,14 +3,19 @@
 //  2. Keep trying with fewer registers
 //  3. Try a 1D job and turn it into tiles in the render kernel
 //  4. If all threads enter the same brick, this brick can be in local mem
-//  5. (DONE) Try some unrolling on the 2nd loop?
-//  6. (DONE) Optimize the world: combine 8x8x8 solid voxels
-//  7. Optimize for 2080 and 1080
-//  8. Add UI to obj2vox
-//  9. Create a website with a library of vox files
-// 10. Improve readme.md
-// 11. Figure out how to detect 1080/2080/3080/AMD/other
-// 12. Have a nicer benchmark scene: planet with asteroid debris?
+//  5. Add UI to obj2vox
+//  6. Create a website with a library of vox files
+//  7. Improve readme.md
+//  8. Have a nicer benchmark scene: planet with asteroid debris?
+//  9. Trace does not respect initial t
+// 10. Add occlusion ray query
+
+// DONE:
+// - Figure out how to detect 1080/2080/3080/AMD/other
+// - Optimize for 2080 and 1080
+// - Try some unrolling on the 2nd loop?
+// - Optimize the world: combine 8x8x8 solid voxels
+
 
 // internal stuff
 #define OFFS_X		((bits >> 5) & 1)			// extract grid plane offset over x (0 or 1)
