@@ -43,11 +43,10 @@ float SphericalPhi( const float3& v ) { const float p = atan2f( v.y, v.x ); retu
 // ----------------------------------------------------------------------------
 World::World( const uint targetID )
 {
-	// create the commit buffer, used to sync CPU-side changes to the GPU
+	// create the staging buffer, used to sync CPU-side changes to the GPU
 	if (!Kernel::InitCL()) FATALERROR( "Failed to initialize OpenCL" );
 	devmem = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_ONLY, commitSize, 0, 0 );
 	modified = new uint[BRICKCOUNT / 32]; // 1 bit per brick, to track 'dirty' bricks
-#if GRID_IN_3DIMAGE == 1
 	// store top-level grid in a 3D texture
 	cl_image_format fmt;
 	fmt.image_channel_order = CL_R;
@@ -55,13 +54,8 @@ World::World( const uint targetID )
 	cl_image_desc desc;
 	memset( &desc, 0, sizeof( cl_image_desc ) );
 	desc.image_type = CL_MEM_OBJECT_IMAGE3D;
-	desc.image_width = MAPWIDTH / BRICKDIM;
-	desc.image_height = MAPHEIGHT / BRICKDIM;
-	desc.image_depth = MAPDEPTH / BRICKDIM;
+	desc.image_width = GRIDWIDTH, desc.image_height = GRIDHEIGHT, desc.image_depth = GRIDDEPTH;
 	gridMap = clCreateImage( Kernel::GetContext(), CL_MEM_HOST_NO_ACCESS, &fmt, &desc, 0, 0 );
-#else
-	gridMap = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_WRITE, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 0, 0 );
-#endif
 	// create brick storage
 	brick = (PAYLOAD*)_aligned_malloc( CHUNKCOUNT * CHUNKSIZE, 64 );
 #if ONEBRICKBUFFER == 1
@@ -95,7 +89,11 @@ World::World( const uint targetID )
 	history[0] = new Buffer( 4 * SCRWIDTH * SCRHEIGHT );
 	history[1] = new Buffer( 4 * SCRWIDTH * SCRHEIGHT );
 	tmpFrame = new Buffer( 4 * SCRWIDTH * SCRHEIGHT );
-	renderer = new Kernel( "cl/kernels.cl", "render" );
+#if TAA == 1
+	renderer = new Kernel( "cl/kernels.cl", "renderTAA" );
+#else
+	renderer = new Kernel( "cl/kernels.cl", "renderNoTAA" );
+#endif
 	finalizer = new Kernel( renderer->GetProgram(), "finalize" );
 	unsharpen = new Kernel( renderer->GetProgram(), "unsharpen" );
 	committer = new Kernel( renderer->GetProgram(), "commit" );
@@ -103,10 +101,6 @@ World::World( const uint targetID )
 	batchToVoidTracer = new Kernel( renderer->GetProgram(), "traceBatchToVoid" );
 #if MORTONBRICKS == 1
 	encodeBricks = new Kernel( renderer->GetProgram(), "encodeBricks" );
-#endif
-#if CELLSKIPPING == 1
-	hermitFinder = new Kernel( renderer->GetProgram(), "findHermits" );
-	hermitFinder->SetArgument( 0, &devmem );
 #endif
 	uberGrid = clCreateBuffer( Kernel::GetContext(), CL_MEM_READ_WRITE, UBERWIDTH * UBERHEIGHT * UBERDEPTH, 0, 0 );
 	uberGridUpdater = new Kernel( renderer->GetProgram(), "updateUberGrid" );
@@ -1440,15 +1434,15 @@ Render flow:
 	 if their voxels do not exist.
 2. GLFW application loop calls Game::Tick:
    - Game::Tick executes game logic on the CPU.
-   - Via the world object, changes are placed in the commit buffer.
+   - Via the world object, changes are placed in the staging buffer.
 3. GLFW application loop calls World::Commit:
    - Sprites are added back, to be displayed.
-   - The new top-level grid (128^3 uints, 8MB) is copied into the commit buffer.
-   - Changed bricks are detected and added to the commit buffer.
-   - An asynchronous copy of the commit buffer (host->device) is started.
+   - The new top-level grid (128^3 uints, 8MB) is copied into the staging buffer.
+   - Changed bricks are detected and added to the staging buffer.
+   - An asynchronous copy of the staging buffer (host->device) is started.
 4. GLFW application loop draws a full-screen quad, using the texture
    filled by the render kernel.
-The Game::Tick CPU code and the asynchronous copy of the commit buffer are
+The Game::Tick CPU code and the asynchronous copy of the staging buffer are
 typically hidden completely behind the OpenCL render kernel.
 In the next frame, the commit kernel synchronizes with this copy,
 to ensure it completes before the commit kernel is executed on this data.
@@ -1580,7 +1574,7 @@ void World::Commit()
 		clWaitForEvents( 1, &commitDone );
 		commitInFlight = false;
 	}
-	// replace the initial commit buffer by a double-sized buffer in pinned memory
+	// replace the initial staging buffer by a double-sized buffer in pinned memory
 	static uint* pinnedMemPtr = 0;
 	if (pinnedMemPtr == 0)
 	{
@@ -1588,7 +1582,7 @@ void World::Commit()
 		cl_mem pinned = clCreateBuffer( Kernel::GetContext(), CL_MEM_WRITE_ONLY | CL_MEM_ALLOC_HOST_PTR, commitSize * 2, 0, 0 );
 		pinnedMemPtr = (uint*)clEnqueueMapBuffer( Kernel::GetQueue(), pinned, 1, CL_MAP_WRITE, 0, pinnedSize, 0, 0, 0, 0 );
 		StreamCopy( (__m256i*)(pinnedMemPtr + commitSize / 4), (__m256i*)grid, gridSize );
-		grid = pinnedMemPtr + commitSize / 4; // top-level grid resides at the start of the commit buffer
+		grid = pinnedMemPtr + commitSize / 4; // top-level grid resides at the start of the staging buffer
 	}
 	// gather changed bricks
 	tasks = 0;
@@ -1600,14 +1594,14 @@ void World::Commit()
 		{
 			const uint i = j * 32 + k;
 			if (!IsDirty( i )) continue;
-			*brickIndices++ = i; // store index of modified brick at start of commit buffer
+			*brickIndices++ = i; // store index of modified brick at start of staging buffer
 			StreamCopy( (__m256i*)changedBricks, (__m256i*)(brick + i * BRICKSIZE), BRICKSIZE * PAYLOADSIZE );
 			changedBricks += BRICKSIZE * PAYLOADSIZE, tasks++;
 		}
 		ClearMarks32( j );
 		if (tasks + 32 >= MAXCOMMITS) break; // we have too many commits; postpone
 	}
-	// asynchroneously copy the CPU data to the GPU via the commit buffer
+	// asynchroneously copy the CPU data to the GPU via the staging buffer
 	if (tasks > 0 || firstFrame)
 	{
 		// copy top-level grid to start of pinned buffer in preparation of final transfer
@@ -1615,43 +1609,17 @@ void World::Commit()
 		// enqueue (on queue 2) memcopy of pinned buffer to staging buffer on GPU
 		const uint copySize = firstFrame ? commitSize : (gridSize + MAXCOMMITS * 4 + tasks * BRICKSIZE * PAYLOADSIZE);
 		clEnqueueWriteBuffer( Kernel::GetQueue2(), devmem, 0, 0, copySize, pinnedMemPtr, 0, 0, 0 );
-	#if CELLSKIPPING == 1
-		// find cells surrounded by empty cells
-		const size_t ws = 128 * 128 * 128;
-		const size_t ls = 128;
-		clEnqueueNDRangeKernel( Kernel::GetQueue2(), hermitFinder->GetKernel(), 1, 0, &ws, &ls, 0, 0, &hermitDone );
-	#if 0
-		clWaitForEvents( 1, &hermitDone );
-		cl_ulong hermitStart = 0, hermitEnd = 0;
-		clGetEventProfilingInfo( hermitDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &hermitStart, 0 );
-		clGetEventProfilingInfo( hermitDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &hermitEnd, 0 );
-		unsigned long duration = (unsigned long)(hermitEnd - hermitStart); // in nanoseconds
-		printf( "hermits detected in %5.2fms\n", duration / 1000000000.0f );
-	#endif
-	#endif
 		const size_t ws = UBERWIDTH * UBERHEIGHT * UBERDEPTH;
 		const size_t ls = 16;
 		clEnqueueNDRangeKernel( Kernel::GetQueue2(), uberGridUpdater->GetKernel(), 1, 0, &ws, &ls, 0, 0, &ubergridDone );
-	#if 0
-		clWaitForEvents( 1, &ubergridDone );
-		cl_ulong uberStart = 0, uberEnd = 0;
-		clGetEventProfilingInfo( ubergridDone, CL_PROFILING_COMMAND_START, sizeof( cl_ulong ), &uberStart, 0 );
-		clGetEventProfilingInfo( ubergridDone, CL_PROFILING_COMMAND_END, sizeof( cl_ulong ), &uberEnd, 0 );
-		unsigned long duration = (unsigned long)(uberEnd - uberStart); // in nanoseconds
-		printf( "ubergrid constructed in %10.7fms\n", duration / 1000000.0f );
-	#endif
-	#if GRID_IN_3DIMAGE == 1
 		// enqueue (on queue 2) vram-to-vram copy of the top-level grid to a 3D OpenCL image buffer
 		size_t origin[3] = { 0, 0, 0 };
 		size_t region[3] = { GRIDWIDTH, GRIDDEPTH, GRIDHEIGHT };
 		clEnqueueCopyBufferToImage( Kernel::GetQueue2(), devmem, gridMap, 0, origin, region, 0, 0, &copyDone );
-	#else
-		clEnqueueCopyBuffer( Kernel::GetQueue2(), devmem, gridMap, 0, 0, GRIDWIDTH * GRIDHEIGHT * GRIDDEPTH * 4, 0, 0, &copyDone );
-	#endif
 		copyInFlight = true;	// next render should wait for this commit to complete
 		firstFrame = false;		// next frame is not the first frame
 	}
-	// bricks and top-level grid have been moved to the final host-side commit buffer; remove sprites and particles
+	// bricks and top-level grid have been moved to the final host-side staging buffer; remove sprites and particles
 	// NOTE: this must explicitly happen in reverse order.
 	for (int s = (int)particles.size(), i = s - 1; i >= 0; i--) EraseParticles( i );
 	for (int s = (int)sprite.size(), i = s - 1; i >= 0; i--)

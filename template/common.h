@@ -110,8 +110,6 @@ struct RenderParams
 #define CHUNKSIZE	((BRICKCOUNT * BRICKSIZE * PAYLOADSIZE) / CHUNKCOUNT)
 
 // experimental
-#define GRID_IN_3DIMAGE	1 // slightly faster
-#define CELLSKIPPING	0 // take larger steps when possible
 #define ONEBRICKBUFFER	1 // use a single (large) brick buffer; set to 0 on low mem devices
 #define MORTONBRICKS	0 // store bricks in morton order to improve data locality (slower)
 

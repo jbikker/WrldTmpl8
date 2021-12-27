@@ -2,17 +2,17 @@
 #include "cl/trace.cl"
 #include "cl/tools.cl"
 
-float4 render_whitted( const float2 screenPos, __constant struct RenderParams* params,
-#if GRID_IN_3DIMAGE == 1
-	__read_only image3d_t grid,
+#if ONEBRICKBUFFER == 1
+#define BRICKPARAMS brick0
 #else
-	__global const unsigned int* grid,
+#define BRICKPARAMS brick0, brick1, brick2, brick3
 #endif
+
+float4 render_whitted( const float2 screenPos, __constant struct RenderParams* params,
+	__read_only image3d_t grid,
 	__global const PAYLOAD* brick0,
 #if ONEBRICKBUFFER == 0
-	__global const PAYLOAD* brick1,
-	__global const PAYLOAD* brick2,
-	__global const PAYLOAD* brick3,
+	__global const PAYLOAD* brick1, __global const PAYLOAD* brick2, __global const PAYLOAD* brick3,
 #endif
 	__global float4* sky, __global const uint* blueNoise,
 	__global const unsigned char* uberGrid
@@ -26,11 +26,7 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 		// trace primary ray
 		uint side = 0;
 		const float3 D = GenerateCameraRay( screenPos + (float2)((float)u * (1.0f / AA_SAMPLES), (float)v * (1.0f / AA_SAMPLES)), params );
-	#if ONEBRICKBUFFER == 1
-		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
-	#else
-		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
-	#endif
+		const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, BRICKPARAMS, 999999 /* no cap needed */ );
 		// simple hardcoded directional lighting using arbitrary unit vector
 		if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
 		{	// scope limiting
@@ -46,16 +42,10 @@ float4 render_whitted( const float2 screenPos, __constant struct RenderParams* p
 }
 
 float4 render_gi( const float2 screenPos, __constant struct RenderParams* params,
-#if GRID_IN_3DIMAGE == 1
 	__read_only image3d_t grid,
-#else
-	__global const unsigned int* grid,
-#endif
 	__global const PAYLOAD* brick0,
 #if ONEBRICKBUFFER == 0
-	__global const PAYLOAD* brick1,
-	__global const PAYLOAD* brick2,
-	__global const PAYLOAD* brick3,
+	__global const PAYLOAD* brick1, __global const PAYLOAD* brick2, __global const PAYLOAD* brick3,
 #endif
 	__global float4* sky, __global const uint* blueNoise,
 	__global const unsigned char* uberGrid
@@ -65,11 +55,7 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	float dist;
 	uint side = 0;
 	const float3 D = GenerateCameraRay( screenPos, params );
-#if ONEBRICKBUFFER == 1
-	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, 999999 /* no cap needed */ );
-#else
-	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, brick0, brick1, brick2, brick3, 999999 /* no cap needed */ );
-#endif
+	const uint voxel = TraceRay( (float4)(params->E, 0), (float4)(D, 1), &dist, &side, grid, uberGrid, BRICKPARAMS, 999999 /* no cap needed */ );
 	const float skyLightScale = params->skyLightScale;
 	// visualize result: simple hardcoded directional lighting using arbitrary unit vector
 	if (voxel == 0) return (float4)(SampleSky( (float3)(D.x, D.z, D.y), sky, params->skyWidth, params->skyHeight ), 1e20f);
@@ -86,11 +72,7 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 		const float4 R = (float4)(DiffuseReflectionCosWeighted( r0, r1, N ), 1);
 		uint side2;
 		float dist2;
-	#if ONEBRICKBUFFER == 1
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, brick0, GRIDWIDTH / 12 );
-	#else
-		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, brick0, brick1, brick2, brick3, GRIDWIDTH / 12 );
-	#endif
+		const uint voxel2 = TraceRay( I + 0.1f * (float4)(N, 0), R, &dist2, &side2, grid, uberGrid, BRICKPARAMS, GRIDWIDTH / 12 );
 		const float3 N2 = VoxelNormal( side2, R.xyz );
 		if (0 /* for comparing against ground truth */) // get_global_id( 0 ) % SCRWIDTH < SCRWIDTH / 2)
 		{
@@ -117,64 +99,55 @@ float4 render_gi( const float2 screenPos, __constant struct RenderParams* params
 	return (float4)(BRDF1 * incoming * (1.0f / GIRAYS), dist);
 }
 
-__kernel void render(
-#if TAA == 0
-	write_only image2d_t outimg,
-#else
-	__global float4* frame,
-#endif
-	__constant struct RenderParams* params,
-#if GRID_IN_3DIMAGE == 1
-	__read_only image3d_t grid,
-#else
-	__global const unsigned int* grid,
-#endif
-	__global float4* sky, __global const uint* blueNoise,
-	__global const unsigned char* uberGrid,
-	__global const PAYLOAD* brick0
+// renderTAA: main rendering entry point. Forwards the request to either a basic
+// renderer or a path tracer with basic indirect light. 'NoTAA' version below.
+__kernel void renderTAA( __global float4* frame, __constant struct RenderParams* params,
+	__read_only image3d_t grid, __global float4* sky, __global const uint* blueNoise,
+	__global const unsigned char* uberGrid, __global const PAYLOAD* brick0
 #if ONEBRICKBUFFER == 0
-	, __global const PAYLOAD* brick1,
-	__global const PAYLOAD* brick2,
-	__global const PAYLOAD* brick3
+	, __global const PAYLOAD* brick1, __global const PAYLOAD* brick2, __global const PAYLOAD* brick3
 #endif
 )
 {
 	// produce primary ray for pixel
-	const int x = get_global_id( 0 );
-	const int y = get_global_id( 1 );
+	const int x = get_global_id( 0 ), y = get_global_id( 1 );
 #if GIRAYS == 0
-#if ONEBRICKBUFFER == 1
-	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, sky, blueNoise, uberGrid );
+	float4 pixel = render_whitted( (float2)(x, y), params, grid, BRICKPARAMS, sky, blueNoise, uberGrid );
 #else
-	float4 pixel = render_whitted( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
+	float4 pixel = render_gi( (float2)(x, y), params, grid, BRICKPARAMS, sky, blueNoise, uberGrid );
 #endif
-#else
-#if ONEBRICKBUFFER == 1
-	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, sky, blueNoise, uberGrid );
-#else
-	float4 pixel = render_gi( (float2)(x, y), params, grid, brick0, brick1, brick2, brick3, sky, blueNoise, uberGrid );
-#endif
-#endif
-#if TAA == 1
-	// store pixel in linear color space for next frame
+	// store pixel in linear color space, to be processed by finalize kernel for TAA
 	frame[x + y * SCRWIDTH] = pixel; // depth in w
-#else
-	// finalize pixel
-	write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( pixel.xyz, 1 ) ), 1) );
-#endif
 }
 
+// renderNoTAA: main rendering entry point. Forwards the request to either a basic
+// renderer or a path tracer with basic indirect light. Version without TAA.
+__kernel void renderNoTAA( write_only image2d_t outimg, __constant struct RenderParams* params,
+	__read_only image3d_t grid, __global float4* sky, __global const uint* blueNoise,
+	__global const unsigned char* uberGrid, __global const PAYLOAD* brick0
+#if ONEBRICKBUFFER == 0
+	, __global const PAYLOAD* brick1, __global const PAYLOAD* brick2, __global const PAYLOAD* brick3
+#endif
+)
+{
+	// produce primary ray for pixel
+	const int x = get_global_id( 0 ), y = get_global_id( 1 );
+#if GIRAYS == 0
+	float4 pixel = render_whitted( (float2)(x, y), params, grid, BRICKPARAMS, sky, blueNoise, uberGrid );
+#else
+	float4 pixel = render_gi( (float2)(x, y), params, grid, BRICKPARAMS, sky, blueNoise, uberGrid );
+#endif
+	// finalize pixel
+	write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( pixel.xyz, 1 ) ), 1) );
+}
+
+// finalize: implementation of the Temporal Anti Aliasing algorithm.
 __kernel void finalize( __global float4* prevFrameIn, __global float4* prevFrameOut,
 	__global float4* frame, __constant struct RenderParams* params )
 {
 	const int x = get_global_id( 0 );
 	const int y = get_global_id( 1 );
-	// get history and current frame pixel
-#if 0
-	// just fetch the same pixel
-	float3 hist = prevFrameIn[x + y * SCRWIDTH].xyz;
-#else
-	// calculate u_prev, v_prev
+	// get history and current frame pixel - calculate u_prev, v_prev
 	const float4 pixelData = frame[x + y * SCRWIDTH];
 	const float2 uv = (float2)((float)x / (float)SCRWIDTH, (float)y / (float)SCRHEIGHT);
 	float3 pixelPos = params->p0 + (params->p1 - params->p0) * uv.x + (params->p2 - params->p0) * uv.y;
@@ -187,19 +160,9 @@ __kernel void finalize( __global float4* prevFrameIn, __global float4* prevFrame
 	const float u_prev = SCRWIDTH * (dl / (dl + dr));
 	const float v_prev = SCRHEIGHT * (dt / (dt + db));
 	float3 hist = bilerpSample( prevFrameIn, u_prev, v_prev );
-#endif
 	const float3 pixel = RGBToYCoCg( pixelData.xyz );
 	// determine color neighborhood
 	int x1 = max( 0, x - 1 ), y1 = max( 0, y - 1 ), x2 = min( SCRWIDTH - 1, x + 1 ), y2 = min( SCRHEIGHT - 1, y + 1 );
-#if 0
-	// basic neighborhood determination
-	float3 minColor = pixel, maxColor = pixel;
-	for (int y = y1; y <= y2; y++) for (int x = x1; x <= x2; x++)
-	{
-		const float3 p = RGBToYCoCg( frame[x + y * SCRWIDTH].xyz );
-		minColor = min( minColor, p ), maxColor = max( maxColor, p );
-	}
-#else
 	// advanced neighborhood determination
 	float3 colorAvg = (float3)0;
 	float3 colorVar = colorAvg;
@@ -216,14 +179,14 @@ __kernel void finalize( __global float4* prevFrameIn, __global float4* prevFrame
 	sigma.z = sqrt( sigma.z );
 	const float3 minColor = colorAvg - 1.25f * sigma;
 	const float3 maxColor = colorAvg + 1.25f * sigma;
-#endif
 	hist = clamp( RGBToYCoCg( hist ), minColor, maxColor );
 	// final blend
 	const float3 color = YCoCgToRGB( 0.9f * hist + 0.1f * pixel );
 	prevFrameOut[x + y * SCRWIDTH] = (float4)(color, 1);
-	// write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( color, 1 ) ), 1) );
 }
 
+// unsharpen: this kernel finalizes the output of the TAA kernel. Unsharpen is
+// applied because TAA tends to blur the screen; unsharpen (despite its name) remedies this.
 __kernel void unsharpen( write_only image2d_t outimg, __global float4* pixels )
 {
 	const int x = get_global_id( 0 );
@@ -243,6 +206,7 @@ __kernel void unsharpen( write_only image2d_t outimg, __global float4* pixels )
 	write_imagef( outimg, (int2)(x, y), (float4)(LinearToSRGB( ToneMapFilmic_Hejl2015( color.xyz, 1 ) ), 1) );
 }
 
+// traceBatch: trace a batch of rays to the first non-empty voxel.
 __kernel void traceBatch(
 	__read_only image3d_t grid,
 	__global const PAYLOAD* brick0, __global const PAYLOAD* brick1,
@@ -260,25 +224,16 @@ __kernel void traceBatch(
 	// trace ray
 	float3 N;
 	float dist;
-#if ONEBRICKBUFFER == 1
-	const uint voxel = TraceRay(
-		(float4)(O4.x, O4.y, O4.z, 0),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, uberGrid, brick0, 999999
-	);
-#else
-	const uint voxel = TraceRay(
-		(float4)(O4.x, O4.y, O4.z, 0),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, uberGrid, brick0, brick1, brick2, brick3, 999999
-	);
-#endif
+	const uint voxel = TraceRay( (float4)(O4.x, O4.y, O4.z, 0), (float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, uberGrid, BRICKPARAMS, 999999 );
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
 	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
 	hitData[taskId * 2 + 1] = (voxel == 0 ? 0 : Nval) + (voxel << 16);
 }
 
+// traceBatchToVoid: trace a batch of rays to the first empty voxel.
+// TODO: probably broken; needs to be synchronized witht the regular traversal kernel.
 __kernel void traceBatchToVoid(
 	__read_only image3d_t grid,
 	__global const PAYLOAD* brick0, __global const PAYLOAD* brick1,
@@ -296,18 +251,17 @@ __kernel void traceBatchToVoid(
 	// trace ray
 	float3 N;
 	float dist;
-	TraceRayToVoid(
-		(float4)(O4.x, O4.y, O4.z, 0),
-		(float4)(D4.x, D4.y, D4.z, 1),
-		&dist, &N, grid, brick0, brick1, brick2, brick3, uberGrid
-	);
+	TraceRayToVoid( (float4)(O4.x, O4.y, O4.z, 0), (float4)(D4.x, D4.y, D4.z, 1),
+		&dist, &N, grid, BRICKPARAMS, uberGrid );
 	// store query result
 	hitData[taskId * 2 + 0] = as_uint( dist < O4.w ? dist : 1e34f );
 	uint Nval = ((int)N.x + 1) + (((int)N.y + 1) << 2) + (((int)N.z + 1) << 4);
 	hitData[taskId * 2 + 1] = Nval;
 }
 
-__kernel void commit( const int taskCount, __global uint* commit,
+// commit: this kernel moves changed bricks which have been transfered to the on-device
+// staging buffer to their final location.
+__kernel void commit( const int taskCount, __global uint* staging,
 	__global uint* brick0, __global uint* brick1, __global uint* brick2, __global uint* brick3 )
 {
 	// put bricks in place
@@ -317,16 +271,14 @@ __kernel void commit( const int taskCount, __global uint* commit,
 	#if ONEBRICKBUFFER == 0
 		__global uint* bricks[4] = { brick0, brick1, brick2, brick3 };
 	#endif
-		int brickId = commit[task + GRIDSIZE];
-		__global uint* src = commit + MAXCOMMITS + GRIDSIZE + task * (BRICKSIZE * PAYLOADSIZE) / 4;
+		int brickId = staging[task + GRIDSIZE];
+		__global uint* src = staging + MAXCOMMITS + GRIDSIZE + task * (BRICKSIZE * PAYLOADSIZE) / 4;
 		const uint offset = brickId * BRICKSIZE * PAYLOADSIZE / 4; // in dwords
 	#if ONEBRICKBUFFER == 1
 	#if MORTONBRICKS == 1
 		__global PAYLOAD* dst = (__global PAYLOAD*)(brick0 + offset);
-		for (int z = 0; z < 8; z++)
-			for (int y = 0; y < 8; y++)
-				for (int x = 0; x < 8; x++)
-					dst[Morton3Bit( x, y, z )] = ((__global PAYLOAD*)src)[x + y * 8 + z * 64];
+		for (int z = 0; z < 8; z++) for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++)
+			dst[Morton3Bit( x, y, z )] = ((__global PAYLOAD*)src)[x + y * 8 + z * 64];
 	#else
 		for (int i = 0; i < (BRICKSIZE * PAYLOADSIZE) / 4; i++) brick0[offset + i] = src[i];
 	#endif
@@ -337,6 +289,9 @@ __kernel void commit( const int taskCount, __global uint* commit,
 	}
 }
 
+#if MORTONBRICKS == 1
+// encodeBricks: this kernel shuffles the voxels in a brick to Morton order.
+// On NVidia, despite more coherent memory access, this is significantly slower.
 __kernel void encodeBricks( const int taskCount, __global PAYLOAD* brick )
 {
 	// change brick layout to morton order
@@ -345,13 +300,14 @@ __kernel void encodeBricks( const int taskCount, __global PAYLOAD* brick )
 	{
 		PAYLOAD tmp[512];
 		for (int i = 0; i < 512; i++) tmp[i] = brick[task * 512 + i];
-		for (int z = 0; z < 8; z++)
-			for (int y = 0; y < 8; y++)
-				for (int x = 0; x < 8; x++)
-					brick[task * 512 + Morton3Bit( x, y, z )] = tmp[x + y * 8 + z * 64];
+		for (int z = 0; z < 8; z++) for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++)
+			brick[task * 512 + Morton3Bit( x, y, z )] = tmp[x + y * 8 + z * 64];
 	}
 }
+#endif
 
+// updateUberGrid: this kernel creates the 32x32x32 'ubergrid', which contains a '0' for
+// a group of empty 4x4x4 bricks; '1' otherwise.
 __kernel void updateUberGrid( const __global unsigned int* grid, __global unsigned char* uber )
 {
 	const int task = get_global_id( 0 );
@@ -362,34 +318,9 @@ __kernel void updateUberGrid( const __global unsigned int* grid, __global unsign
 	bool empty = true;
 	for (int a = 0; a < 4; a++) for (int b = 0; b < 4; b++) for (int c = 0; c < 4; c++)
 	{
-		const int gx = x * 4 + a;
-		const int gy = y * 4 + b;
-		const int gz = z * 4 + c;
-		if (grid[gx + gz * GRIDWIDTH + gy * GRIDWIDTH * GRIDHEIGHT])
-		{
-			empty = false;
-			break;
-		}
+		const int gx = x * 4 + a, gy = y * 4 + b, gz = z * 4 + c;
+		if (grid[gx + gz * GRIDWIDTH + gy * GRIDWIDTH * GRIDHEIGHT]) { empty = false; break; }
 	}
 	// write result
 	uber[x + z * UBERWIDTH + y * UBERWIDTH * UBERHEIGHT] = empty ? 0 : 1;
 }
-
-#if CELLSKIPPING == 1
-
-__kernel void findHermits( __global unsigned int* grid )
-{
-	const int task = get_global_id( 0 );
-	const int x = task & 127;
-	const int y = (task >> 7) & 127;
-	const int z = (task >> 14) & 127;
-	if (x < 1 || y < 1 || z < 1 || x > 126 || y > 126 || z > 126) return; // skip edges
-	// count empty cells in a 3x3x3 cube
-	int empty = 0;
-	for (int u = -1; u <= 1; u++) for (int v = -1; v <= 1; v++) for (int w = -1; w <= 1; w++)
-		if ((grid[task + u + v * 128 + w * 128 * 128] & 0xffffff) == 0) empty++;
-	// if they're all empty, this cell allows skipping
-	if (empty == 27) grid[task] |= 1 << 30;
-}
-
-#endif

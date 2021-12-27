@@ -430,10 +430,6 @@ private:
 	Kernel* finalizer, * unsharpen;		// TAA finalization kernels
 	Kernel* batchTracer;				// ray batch tracing kernel for inline tracing
 	Kernel* batchToVoidTracer;			// ray batch tracing kernel for inline tracing from solid to void
-#if CELLSKIPPING == 1
-	Kernel* hermitFinder;				// find cells surrounded by empty neighbors
-	cl_event hermitDone;				// for profiling
-#endif
 #if MORTONBRICKS == 1
 	Kernel* encodeBricks;				// reorganizes brick data on the GPU
 #endif

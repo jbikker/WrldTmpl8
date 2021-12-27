@@ -1,20 +1,20 @@
 // Optimizations / plans:
-//  1. Automate finding the optimal workgroup size
-//  2. Keep trying with fewer registers
-//  3. Try a 1D job and turn it into tiles in the render kernel
-//  4. If all threads enter the same brick, this brick can be in local mem
-//  5. Add UI to obj2vox
-//  6. Create a website with a library of vox files
-//  7. Improve readme.md
-//  8. Have a nicer benchmark scene: planet with asteroid debris?
-//  9. Trace does not respect initial t
-// 10. Add occlusion ray query
+// 1. Automate finding the optimal workgroup size
+// 2. Keep trying with fewer registers
+// 3. Try a 1D job and turn it into tiles in the render kernel
+// 4. If all threads enter the same brick, this brick can be in local mem
+// 5. Create a website with a library of vox files
+// 6. Have a nicer benchmark scene: planet with asteroid debris?
+// 7. Trace does not respect initial t
+// 8. Add occlusion ray query
 
 // DONE:
 // - Figure out how to detect 1080/2080/3080/AMD/other
 // - Optimize for 2080 and 1080
 // - Try some unrolling on the 2nd loop?
 // - Optimize the world: combine 8x8x8 solid voxels
+// - Improve readme.md
+// - Add UI to obj2vox
 
 
 // internal stuff
@@ -176,11 +176,16 @@ uint TraceRay( float4 A, const float4 B, float* dist, uint* side, __read_only im
 }
 
 void TraceRayToVoid( float4 A, float4 V, float* dist, float3* N, __read_only image3d_t grid,
+#if ONEBRICKBUFFER == 1
+	__global const PAYLOAD* brick,
+#else
 	__global const PAYLOAD* brick0, __global const PAYLOAD* brick1,
 	__global const PAYLOAD* brick2, __global const PAYLOAD* brick3,
+#endif
 	__global const unsigned char* uber
 )
 {
+#if 0 // TODO
 #if ONEBRICKBUFFER == 0
 	__global const PAYLOAD* bricks[4] = { brick0, brick1, brick2, brick3 };
 #endif
@@ -247,4 +252,5 @@ void TraceRayToVoid( float4 A, float4 V, float* dist, float3* N, __read_only ima
 		else if (t == tm.y) tm.y += td.y, tp += DIR_Y << 10, last = 1;
 		else if (t == tm.z) tm.z += td.z, tp += DIR_Z, last = 2;
 	} while (!(tp & 0xf80e0380));
+#endif
 }
