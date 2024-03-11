@@ -34,6 +34,7 @@ static GLTexture* renderTarget = 0;
 static int scrwidth = 0, scrheight = 0;
 static World* world = 0;
 static Game* game = 0;
+static bool IGP_detected = false;
 
 // static member data for instruction set support class
 static const CPUCaps cpucaps;
@@ -358,6 +359,10 @@ void main()
 	glDisable( GL_CULL_FACE );
 	glDisable( GL_BLEND );
 	CheckGL();
+	char* vendor = (char*)glGetString( GL_VENDOR );
+	char* renderer = (char*)glGetString( GL_RENDERER );
+	if (strstr( vendor, "Intel" )) IGP_detected = true;
+	if (strstr( renderer, "Arc" )) IGP_detected = false;
 	// we want a console window for text output
 #ifdef _MSC_VER
 	CONSOLE_SCREEN_BUFFER_INFO coninfo;
@@ -626,8 +631,20 @@ void DrawQuad()
 		// generate buffers
 		static const GLfloat verts[] = { -1, 1, 0, 1, 1, 0, -1, -1, 0, 1, 1, 0, -1, -1, 0, 1, -1, 0 };
 		static const GLfloat uvdata[] = { 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1 };
-		GLuint vertexBuffer = CreateVBO( verts, sizeof( verts ) );
-		GLuint UVBuffer = CreateVBO( uvdata, sizeof( uvdata ) );
+		static const GLfloat verts_igp[] = { 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0 };
+		static const GLfloat uvdata_igp[] = { -1, -1, 1, -1, -1, 1, 1, -1, -1, 1, 1, 1 };
+		GLuint vertexBuffer, UVBuffer;
+		if (IGP_detected)
+		{
+			// not sure why it is needed - without it IGPs tile and clamp the output.
+			vertexBuffer = CreateVBO( verts_igp, sizeof( verts_igp ) );
+			UVBuffer = CreateVBO( uvdata_igp, sizeof( uvdata_igp ) );
+		}
+		else
+		{
+			vertexBuffer = CreateVBO( verts, sizeof( verts ) );
+			UVBuffer = CreateVBO( uvdata, sizeof( uvdata ) );
+		}
 		glGenVertexArrays( 1, &vao );
 		glBindVertexArray( vao );
 		BindVBO( 0, 3, vertexBuffer );
@@ -1284,7 +1301,7 @@ Kernel::Kernel( char* file, char* entryPoint )
 	// why does the nvidia compiler not support these:
 	// -cl-nv-maxrregcount=64 not faster than leaving it out (same for 128)
 	// -cl-no-subgroup-ifp ? fails on nvidia.
-	error = clBuildProgram( program, 0, NULL, "-cl-nv-verbose -cl-fast-relaxed-math -cl-mad-enable -cl-single-precision-constant", NULL, NULL );
+	error = clBuildProgram( program, 0, NULL, "-cl-fast-relaxed-math -cl-mad-enable -cl-single-precision-constant", NULL, NULL );
 	// handle errors
 	if (error == CL_SUCCESS)
 	{
